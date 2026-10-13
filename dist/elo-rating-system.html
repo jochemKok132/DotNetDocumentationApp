@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elo Rating System · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+          <li><a href="email-confirmation.html">Email Sending &amp; Confirmation Tokens</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+          <li><a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Worked Examples</summary>
+        <ul>
+          <li><a href="elo-rating-system.html" class="active" aria-current="page">Elo Rating System</a></li>
+        </ul>
+      </details>
+    </div>
+    <div class="sidenav-footer">v1.1.0</div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Elo Rating System (Worked Example)</h1>
+<p class="lede">A full feature built from the pieces documented elsewhere on this site: a pure calculation class with no dependencies, an in-memory leaderboard cache, and an orchestrating service that ties them to the repositories — individual <em>and</em> team matches, from the same rating math.</p>
+
+<h2>The pure calculation core</h2>
+<p>Every formula lives as a <code>static</code> method with no I/O and no dependencies — this is exactly the kind of class <a href="unit-testing-moq.html">Unit Testing with Moq</a> covers with <code>[Theory]</code> instead of mocks, because there's nothing to mock.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EloCalculationService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class EloCalculationService
+{
+    public const double DefaultMaxRating = 2000;
+    public const double MinRatingFloor = 100;
+    public const double InitialRating = 800;
+
+    // new players move fast (K=40), veterans move slow (K=10) — the rating
+    // settles down as it becomes more representative of real skill
+    public static double GetKFactor(int matchCount) => matchCount switch
+    {
+        &lt; 10 =&gt; 40,
+        &lt; 30 =&gt; 20,
+        _ =&gt; 10
+    };
+
+    // the standard logistic Elo curve: a 400-point gap means the
+    // higher-rated player is expected to win ~91% of the time
+    public static double CalculateExpectedScore(double playerRating, double opponentRating)
+        =&gt; 1.0 / (1.0 + Math.Pow(10, (opponentRating - playerRating) / 400.0));
+
+    public static double CalculateNewRating(
+        double currentRating, double actualScore, double expectedScore,
+        int matchCount, double maxRating = DefaultMaxRating)
+    {
+        double kFactor = GetKFactor(matchCount);
+        double newRating = currentRating + kFactor * (actualScore - expectedScore);
+        return Math.Clamp(newRating, MinRatingFloor, maxRating);
+    }
+
+    // placement in an N-player match, linearly interpolated to a 0..1 score —
+    // 1v1 is a special case since interpolating with 2 players is just win/loss
+    public static double ConvertPlacementToScore(int placement, int totalParticipants, bool isTie = false)
+    {
+        if (isTie) return 0.5;
+        if (totalParticipants &lt;= 2) return placement == 1 ? 1.0 : 0.0;
+
+        return Math.Max(0.0, 1.0 - ((placement - 1.0) / (totalParticipants - 1.0)));
+    }
+
+    public static bool IsValidActualScore(double actualScore)
+        =&gt; actualScore &gt;= 0.0 &amp;&amp; actualScore &lt;= 1.0;
+}</code></pre>
+</div>
+
+<p>Team matches reuse every one of these — a team's "rating" for matchmaking purposes is just the average of its members, fed through the same expected-score formula:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EloCalculationService.cs — team variants</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static double CalculateTeamAverageRating(List&lt;double&gt; teamMemberRatings)
+    =&gt; teamMemberRatings is { Count: &gt; 0 } ? teamMemberRatings.Average() : InitialRating;
+
+public static double CalculateTeamExpectedScore(List&lt;double&gt; teamRatings, List&lt;double&gt; opponentTeamRatings)
+    =&gt; CalculateExpectedScore(
+        CalculateTeamAverageRating(teamRatings),
+        CalculateTeamAverageRating(opponentTeamRatings));
+
+// every team member gets the SAME team actual/expected score, but their OWN
+// K-factor and current rating — a veteran on a winning team moves less than
+// a newcomer on the same team
+public static List&lt;double&gt; CalculateTeamNewRatings(
+    List&lt;double&gt; teamMemberRatings, double teamActualScore, double teamExpectedScore,
+    List&lt;int&gt; matchCounts, double maxRating = DefaultMaxRating)
+{
+    if (teamMemberRatings.Count != matchCounts.Count)
+        throw new ArgumentException("Ratings and match counts must be the same length.");
+
+    return teamMemberRatings
+        .Select((rating, i) =&gt; CalculateNewRating(rating, teamActualScore, teamExpectedScore, matchCounts[i], maxRating))
+        .ToList();
+}</code></pre>
+</div>
+
+<h2>Caching the leaderboard, per category and overall</h2>
+<p>Same locked-dictionary-with-TTL shape as <a href="in-memory-caching.html">In-Memory Caching</a>, extended to hold more than one cache entry — one per category, plus a special <code>Guid.Empty</code> key for the cross-category overall leaderboard. The overall leaderboard also has to <em>combine</em> ratings across categories, which the per-category one doesn't.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>LeaderboardService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class LeaderboardService
+{
+    private readonly Dictionary&lt;Guid, LeaderboardCache&gt; _cache = [];
+    private readonly object _lock = new();
+
+    public List&lt;LeaderboardEntry&gt; GetCategoryLeaderboard(
+        Guid categoryId, IEnumerable&lt;Rating&gt; ratings, int cacheDurationMinutes = 5)
+    {
+        lock (_lock)
+        {
+            if (_cache.TryGetValue(categoryId, out var cached) &amp;&amp;
+                DateTime.UtcNow - cached.CachedAt &lt; TimeSpan.FromMinutes(cacheDurationMinutes))
+                return cached.Entries;
+
+            var entries = BuildLeaderboardEntries(ratings);
+            _cache[categoryId] = new LeaderboardCache { CachedAt = DateTime.UtcNow, Entries = entries };
+            return entries;
+        }
+    }
+
+    public List&lt;LeaderboardEntry&gt; GetOverallLeaderboard(IEnumerable&lt;Rating&gt; allRatings, int cacheDurationMinutes = 5)
+    {
+        var overallKey = Guid.Empty; // a sentinel key sharing the same cache dictionary
+
+        lock (_lock)
+        {
+            if (_cache.TryGetValue(overallKey, out var cached) &amp;&amp;
+                DateTime.UtcNow - cached.CachedAt &lt; TimeSpan.FromMinutes(cacheDurationMinutes))
+                return cached.Entries;
+
+            // group by user first — one player's ratings across every category
+            // collapse into a single weighted overall rating (see CalculateOverallRating)
+            var entries = allRatings
+                .Where(r =&gt; r.User != null)
+                .GroupBy(r =&gt; r.UserId)
+                .Select(group =&gt; (group.First().User!, CategoryRatings: group.ToDictionary(
+                    r =&gt; r.CategoryId.ToString(), r =&gt; (r.CurrentRating, r.MatchCount))))
+                .Select(data =&gt; new LeaderboardEntry
+                {
+                    UserId = data.User.Id,
+                    FullName = data.User.FullName,
+                    Rating = EloCalculationService.CalculateOverallRating(data.CategoryRatings),
+                    MatchCount = data.CategoryRatings.Values.Sum(x =&gt; x.MatchCount)
+                })
+                .OrderByDescending(e =&gt; e.Rating)
+                .Select((entry, index) =&gt; { entry.Rank = index + 1; return entry; })
+                .ToList();
+
+            _cache[overallKey] = new LeaderboardCache { CachedAt = DateTime.UtcNow, Entries = entries };
+            return entries;
+        }
+    }
+
+    // a recorded match invalidates BOTH: the category it happened in,
+    // and the overall leaderboard it also feeds into
+    public void InvalidateCache(Guid categoryId)
+    {
+        lock (_lock)
+        {
+            _cache.Remove(categoryId);
+            _cache.Remove(Guid.Empty);
+        }
+    }
+}</code></pre>
+</div>
+
+<h2>The orchestrating service</h2>
+<p>This is where the repositories (<a href="repository-pattern.html">Repository Pattern</a>), the calculation class, and the cache all meet. The interesting part is that individual and team matches reuse almost all the same per-player update logic — only how <em>actual score</em> and <em>expected score</em> are computed up front differs.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EloService.cs — recording an individual match</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task&lt;MatchResultDto&gt; RecordMatchAsync(RecordMatchRequest request)
+{
+    var category = await _categoryRepository.GetByIdAsync(request.CategoryId)
+        ?? throw new InvalidOperationException($"Category {request.CategoryId} not found");
+
+    var match = new Match { Id = Guid.NewGuid(), CategoryId = request.CategoryId, IsFinalized = false };
+
+    var results = request.MatchType?.ToLower() == "team"
+        ? await ProcessTeamMatchAsync(match, request)
+        : await ProcessIndividualMatchAsync(match, request);
+
+    match.IsFinalized = true;
+    await _matchRepository.UpdateAsync(match);
+
+    // the cache doesn't know a match happened — it has to be told explicitly
+    _leaderboardService.InvalidateCache(request.CategoryId);
+
+    return new MatchResultDto { MatchId = match.Id, Results = results };
+}
+
+private async Task&lt;List&lt;ParticipantResultDto&gt;&gt; ProcessIndividualMatchAsync(Match match, RecordMatchRequest request)
+{
+    // load every participant's current rating up front — an N-player free-for-all
+    // needs everyone else's rating to compute any one player's expected score
+    var participantData = new List&lt;(MatchParticipantInput Input, Rating Rating, User User)&gt;();
+    foreach (var p in request.Participants)
+    {
+        var rating = await _ratingRepository.GetOrCreateRatingAsync(p.UserId, match.CategoryId);
+        var user = await _userRepository.GetByIdAsync(p.UserId)
+            ?? throw new InvalidOperationException($"User {p.UserId} not found");
+        participantData.Add((p, rating, user));
+    }
+
+    var results = new List&lt;ParticipantResultDto&gt;();
+    var totalPlayers = request.Participants.Count;
+
+    for (int i = 0; i &lt; participantData.Count; i++)
+    {
+        var (input, rating, user) = participantData[i];
+
+        var actualScore = EloCalculationService.ConvertPlacementToScore(input.Placement, totalPlayers, input.IsTie);
+
+        // expected score against a free-for-all field = average expected score
+        // against every OTHER participant, one at a time
+        var otherRatings = participantData.Where((_, idx) =&gt; idx != i).Select(p =&gt; p.Rating.CurrentRating).ToList();
+        var expectedScore = otherRatings.Count == 0
+            ? 0.5
+            : otherRatings.Average(opp =&gt; EloCalculationService.CalculateExpectedScore(rating.CurrentRating, opp));
+
+        var newRating = EloCalculationService.CalculateNewRating(rating.CurrentRating, actualScore, expectedScore, rating.MatchCount);
+        var ratingChange = newRating - rating.CurrentRating;
+
+        rating.CurrentRating = newRating;
+        rating.MatchCount++;
+        if (newRating &gt; rating.PeakRating) rating.PeakRating = newRating;
+        await _ratingRepository.UpdateAsync(rating);
+
+        await _participantRepository.AddAsync(new MatchParticipant
+        {
+            MatchId = match.Id, UserId = user.Id, Placement = input.Placement,
+            ActualScore = actualScore, ExpectedScore = expectedScore, RatingChange = ratingChange
+        });
+
+        results.Add(new ParticipantResultDto { UserId = user.Id, RatingChange = ratingChange, NewRating = newRating });
+    }
+
+    return results;
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EloService.cs — team matches: group, then reuse the same per-player update</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">private async Task&lt;List&lt;ParticipantResultDto&gt;&gt; ProcessTeamMatchAsync(Match match, RecordMatchRequest request)
+{
+    var teamGroups = request.Participants.GroupBy(p =&gt; p.TeamId ?? Guid.NewGuid()).ToList();
+    if (teamGroups.Count &lt; 2)
+        throw new InvalidOperationException("A team match needs at least 2 teams.");
+
+    // ... load each team's members' ratings the same way as the individual path ...
+
+    var team1Ratings = team1Data.Members.Select(m =&gt; m.Rating.CurrentRating).ToList();
+    var team2Ratings = team2Data.Members.Select(m =&gt; m.Rating.CurrentRating).ToList();
+
+    double team1Expected = EloCalculationService.CalculateTeamExpectedScore(team1Ratings, team2Ratings);
+    double team1Actual = team1Data.Placement == team2Data.Placement ? 0.5 : (team1Data.Placement == 1 ? 1.0 : 0.0);
+
+    // one shared team score, but CalculateTeamNewRatings still applies each
+    // member's OWN K-factor — the "reuse the per-player math" part
+    var team1MatchCounts = team1Data.Members.Select(m =&gt; m.Rating.MatchCount).ToList();
+    var team1NewRatings = EloCalculationService.CalculateTeamNewRatings(team1Ratings, team1Actual, team1Expected, team1MatchCounts);
+
+    // ... persist each member's new rating + MatchParticipant row, same as the individual path ...
+}</code></pre>
+</div>
+
+<h2>Why this is worth reading as one piece</h2>
+<ul>
+  <li><strong>The calculation class never touches a repository.</strong> It's the thing <a href="unit-testing-moq.html">Unit Testing with Moq</a> tests with plain <code>[Theory]</code> data instead of mocks — there's nothing to fake.</li>
+  <li><strong>The cache doesn't know when it's stale on its own.</strong> <code>RecordMatchAsync</code> has to call <code>InvalidateCache</code> explicitly, for both the category and overall keys — exactly the "invalidate on write" rule from <a href="in-memory-caching.html">In-Memory Caching</a>.</li>
+  <li><strong>Individual and team matches share almost everything</strong> except how the actual/expected score is computed up front — a sign the per-player update loop was factored at the right boundary.</li>
+</ul>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

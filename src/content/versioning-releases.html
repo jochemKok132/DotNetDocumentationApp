@@ -1,0 +1,135 @@
+<h1>Versioned Releases &amp; Auto-Deploy</h1>
+<p class="lede">Tag a GitHub Release, and the server updates to it automatically — no manual <code>git pull</code>, no SSH session, no nginx reload. The trick is a single <code>current</code> symlink: deploying is just re-pointing it, so it's also the instant rollback mechanism.</p>
+
+<h2>Why a symlink instead of deploying into one fixed folder</h2>
+<p>Deploying straight into the folder nginx serves from means there's a window — however short — where half the new files are written and half the old ones remain, and a request landing in that window gets a broken mix of versions. Writing each release into its <em>own</em> folder and only then flipping one symlink avoids that window entirely: nginx resolves the symlink fresh on every request, so from nginx's point of view the switch is a single atomic step, not a gradual overwrite.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>layout on the server</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-text">/var/www/docs/
+├── releases/
+│   ├── v1.0.0/        ← full build output, never touched again
+│   ├── v1.1.0/
+│   └── v1.2.0/
+└── current -> releases/v1.2.0/   ← nginx always reads through here</code></pre>
+</div>
+
+<p>Rolling back a bad release is <code>ln -sfn releases/v1.1.0 current</code> — no rebuild, no redeploy, just pointing the symlink at a folder that's already known to work.</p>
+
+<h2>What "version" means here: package.json, read at build time</h2>
+<p>The version number isn't invented at deploy time — it's whatever's already in <code>package.json</code>, which a GitHub Release bump is what actually changes. <code>build.js</code> reads it once and stamps it into every page's footer, so the running site can always tell you exactly which release it is.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>package.json</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-json">{
+  "name": "your-docs-site",
+  "version": "1.2.0",
+  "private": true,
+  "scripts": { "build": "node build.js" }
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>build.js (excerpt)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-javascript">const VERSION = require('./package.json').version;
+
+// ...per page:
+const html = template
+  .replace('{{TITLE}}', escapeHtml(item.title))
+  .replace('{{SIDEBAR}}', sidebar)
+  .replace('{{VERSION}}', escapeHtml(VERSION))
+  .replace('{{CONTENT}}', content);</code></pre>
+</div>
+
+<p>Bumping the version is a deliberate, reviewable change (<code>npm version minor</code>, or editing the field by hand in a PR) — not something CI invents from a commit count or a timestamp. That keeps the number meaningful: "1.2.0" is a decision someone made, not an artifact of how many times the pipeline happened to run.</p>
+
+<h2>The workflow: release published → build → ship → swap</h2>
+<p>Triggering on <code>release: published</code> rather than <code>push</code> to main is the key choice — it means production only ever moves forward when someone deliberately cuts a release (via the GitHub UI or <code>gh release create</code>), never on every merged commit. Day-to-day pushes to main can run their own build-and-test workflow (see <a href="ci-pipeline.html">CI Pipeline</a>) without ever touching the live site.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>.github/workflows/release-deploy.yml</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">name: Deploy latest release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build static site
+        run: node build.js
+
+      - name: Deploy to server (releases/&lt;version&gt; + atomic symlink swap)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+          TAG="${{ github.event.release.tag_name }}"
+          RELEASE_DIR="/var/www/docs/releases/$TAG"
+
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$RELEASE_DIR'"
+
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" \
+            ./dist/ "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE_DIR/"
+
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "ln -sfn '$RELEASE_DIR' /var/www/docs/current"
+
+          # keep the last 5 releases for instant rollback, prune the rest
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /var/www/docs/releases && ls -1dt */ | tail -n +6 | xargs -r rm -rf"</code></pre>
+</div>
+
+<blockquote>
+<p><code>rsync --delete</code> targets the <em>new</em> release's own folder (<code>$RELEASE_DIR</code>), never <code>current</code> — it's only cleaning up stray files within that one fresh directory, not touching whatever's currently live. The symlink swap is the only step that ever changes what nginx is serving.</p>
+<p>Three secrets carry the server access: <code>DEPLOY_HOST</code>, <code>DEPLOY_USER</code>, and a private key as <code>DEPLOY_SSH_KEY</code> (the matching public key goes in that user's <code>~/.ssh/authorized_keys</code> on the server — generate a deploy-only keypair, don't reuse a personal one). Same repository-secrets rule as everywhere else in this project: see <a href="ci-pipeline.html">CI Pipeline</a>.</p>
+</blockquote>
+
+<h2>Serving through the symlink: the one-line nginx change</h2>
+<p>nginx needs no reload when a release ships — it was already pointed at <code>current</code>, and the kernel resolves that symlink on every single request. Compare this to the earlier, simpler setup in <a href="docker-nginx.html">Dockerizing for nginx</a>, where a bind mount pointed straight at a fixed <code>dist/</code> folder:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>nginx.conf (excerpt)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-nginx">location /docs/ {
+    alias /var/www/docs/current/;
+    try_files $uri $uri.html $uri/ =404;
+}</code></pre>
+</div>
+
+<h3>When this pattern is worth it over the simpler bind-mount setup</h3>
+<ul>
+  <li>You want releases to be an explicit, reviewable event (cut from the GitHub UI, with release notes) rather than "whatever's on main right now."</li>
+  <li>You want rollback to be instant and not require a rebuild — just re-point the symlink.</li>
+  <li>The deploy target is a single always-on server reachable over SSH. For containerized or multi-instance deployments, the equivalent idea is tagging and pushing a versioned image and rolling it out through your orchestrator instead of symlink-swapping files on disk.</li>
+</ul>

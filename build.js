@@ -11,6 +11,13 @@ const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const nav = require('./nav.config.js');
 
+// Version comes from package.json, and package.json's version is the thing a
+// GitHub Release bumps. The release workflow (see .github/workflows/release-deploy.yml
+// and the "Versioned Releases & Auto-Deploy" page) tags a commit, publishes a
+// GitHub Release from it, and only then does this build run — so the number
+// stamped into the footer always matches a real, published release.
+const VERSION = require('./package.json').version;
+
 function clean(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
@@ -76,6 +83,7 @@ function build() {
       const html = template
         .replace('{{TITLE}}', escapeHtml(item.title))
         .replace('{{SIDEBAR}}', sidebar)
+        .replace('{{VERSION}}', escapeHtml(VERSION))
         .replace('{{CONTENT}}', content);
 
       fs.writeFileSync(path.join(DIST, `${item.slug}.html`), html);

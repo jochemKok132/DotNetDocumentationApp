@@ -45,6 +45,7 @@ module.exports = [
       { title: 'Mapping & Validation Extensions', slug: 'mapping-validation', file: 'mapping-validation.html' },
       { title: 'In-Memory Caching', slug: 'in-memory-caching', file: 'in-memory-caching.html' },
       { title: 'Background Jobs', slug: 'background-jobs', file: 'background-jobs.html' },
+      { title: 'Email Sending & Confirmation Tokens', slug: 'email-confirmation', file: 'email-confirmation.html' },
     ],
   },
   {
@@ -62,6 +63,7 @@ module.exports = [
       { title: 'Dockerizing for nginx', slug: 'docker-nginx', file: 'docker-nginx.html' },
       { title: 'Docker for Local Development', slug: 'docker-local-dev', file: 'docker-local-dev.html' },
       { title: 'CI Pipeline (GitHub Actions)', slug: 'ci-pipeline', file: 'ci-pipeline.html' },
+      { title: 'Versioned Releases & Auto-Deploy', slug: 'versioning-releases', file: 'versioning-releases.html' },
     ],
   },
   {
@@ -75,6 +77,12 @@ module.exports = [
     title: 'Testing',
     items: [
       { title: 'Unit Testing with Moq', slug: 'unit-testing-moq', file: 'unit-testing-moq.html' },
+    ],
+  },
+  {
+    title: 'Worked Examples',
+    items: [
+      { title: 'Elo Rating System', slug: 'elo-rating-system', file: 'elo-rating-system.html' },
     ],
   },
 ];

@@ -1,8 +1,8 @@
 {
-  "name": "docsite",
-  "version": "1.0.0",
+  "name": "dotnet-docs",
+  "version": "1.1.0",
   "private": true,
-  "description": "Static documentation site — sidenav with dropdowns, dark theme, code blocks.",
+  "description": "Static documentation site for Jochem's .NET conventions. Zero runtime dependencies — build.js just reads nav.config.js + src/content/*.html and writes dist/.",
   "scripts": {
     "build": "node build.js"
   }

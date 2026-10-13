@@ -65,6 +65,7 @@
           <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
           <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
           <li><a href="background-jobs.html">Background Jobs</a></li>
+          <li><a href="email-confirmation.html">Email Sending &amp; Confirmation Tokens</a></li>
         </ul>
       </details>
       <details class="nav-section">
@@ -82,6 +83,7 @@
           <li><a href="docker-nginx.html" class="active" aria-current="page">Dockerizing for nginx</a></li>
           <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
           <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+          <li><a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a></li>
         </ul>
       </details>
       <details class="nav-section">
@@ -97,7 +99,14 @@
           <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
         </ul>
       </details>
+      <details class="nav-section">
+        <summary>Worked Examples</summary>
+        <ul>
+          <li><a href="elo-rating-system.html">Elo Rating System</a></li>
+        </ul>
+      </details>
     </div>
+    <div class="sidenav-footer">v1.1.0</div>
   </nav>
 
   <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
@@ -175,7 +184,7 @@ ENTRYPOINT ["dotnet", "YourApp.API.dll"]</code></pre>
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./docs-site/dist:/var/www/docs:ro
+      - /var/www/docs:/var/www/docs:ro
     depends_on:
       - api
     restart: unless-stopped
@@ -205,14 +214,18 @@ volumes:
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Docs site — plain static files, same pattern as nginx.conf.example
-    # from the docs-site project itself
+    # Docs site — plain static files, served through a "current" symlink
+    # rather than a fixed path, so a new release goes live by re-pointing
+    # one symlink instead of touching nginx at all (see Versioned Releases
+    # & Auto-Deploy).
     location /docs/ {
-        alias /var/www/docs/;
+        alias /var/www/docs/current/;
         try_files $uri $uri.html $uri/ =404;
     }
 }</code></pre>
 </div>
+
+<p>No <code>nginx -s reload</code> is needed when a new release ships: nginx resolves <code>/var/www/docs/current/</code> on every request, so it always follows wherever that symlink currently points — see <a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a> for how the symlink gets flipped.</p>
 
 <h2>Building and running</h2>
 <div class="code-block">

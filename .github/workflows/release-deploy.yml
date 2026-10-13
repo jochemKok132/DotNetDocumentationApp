@@ -1,0 +1,59 @@
+name: Deploy latest release
+
+# Fires only when a GitHub Release is published (not on every push), so the
+# site in production always matches a tagged, intentional version — never a
+# half-finished commit on main.
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The release event already points at the tagged commit; this just
+          # makes that explicit instead of relying on the default ref.
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build static site
+        run: node build.js
+
+      - name: Deploy to server (releases/<version> + atomic symlink swap)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+          TAG="${{ github.event.release.tag_name }}"
+          RELEASE_DIR="/var/www/docs/releases/$TAG"
+
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$RELEASE_DIR'"
+
+          # Ship this release's build into its own folder — never into the
+          # folder nginx is currently serving.
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" \
+            ./dist/ "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE_DIR/"
+
+          # Flip the "current" symlink to the new release in one atomic `ln`.
+          # nginx (see nginx.conf in Dockerizing for nginx) always serves
+          # through /var/www/docs/current, so this instant is the entire
+          # deploy — no half-updated directory is ever visible to a request,
+          # and there's zero nginx reload or container restart involved.
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "ln -sfn '$RELEASE_DIR' /var/www/docs/current"
+
+          # Keep the last 5 releases on disk for instant rollback
+          # (just re-point the symlink at an older folder), prune anything older.
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /var/www/docs/releases && ls -1dt */ | tail -n +6 | xargs -r rm -rf"
