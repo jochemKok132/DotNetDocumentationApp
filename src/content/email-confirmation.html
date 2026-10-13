@@ -1,0 +1,285 @@
+<h1>Email Sending &amp; Confirmation Tokens</h1>
+<p class="lede">Sending transactional email with embedded HTML/text templates, and a generic token-based confirmation flow for anything that needs "click this link to confirm" (sign-up, cancellation, password setup) without touching the database until the link is actually clicked.</p>
+
+<h2>Email templates as embedded resources, not Razor</h2>
+<p>Each email has a matching HTML and plain-text file embedded as a resource, with a shared HTML layout for header/footer. A static <code>EmailTemplates</code> class does simple <code>{{Token}}</code> placeholder substitution — no Razor rendering engine needed for something this small, and the templates stay easy to preview by just opening the HTML file in a browser.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EmailMessage.cs (Domain)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class EmailMessage
+{
+    public string ToEmail { get; set; } = string.Empty;
+    public string ToName { get; set; } = string.Empty;
+
+    public string Subject { get; set; } = string.Empty;
+    public string HtmlBody { get; set; } = string.Empty;
+    public string TextBody { get; set; } = string.Empty;
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Templates/EmailTemplates.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class EmailTemplates
+{
+    public static EmailMessage EnrollmentConfirmation(string email, string fullName, string link)
+    {
+        var values = new Dictionary&lt;string, string&gt;
+        {
+            ["FullName"] = fullName,
+            ["Email"] = email,
+            ["Link"] = link
+        };
+
+        return new EmailMessage
+        {
+            ToEmail = email,
+            ToName = fullName,
+            Subject = "Confirm your enrollment",
+            HtmlBody = RenderHtml("EnrollmentConfirmation.html", "Confirm your enrollment", values),
+            TextBody = Fill(Read("EnrollmentConfirmation.txt"), values, encode: false)
+        };
+    }
+
+    // WithdrawalConfirmation(...) and PasswordSetup(...) follow the exact same shape
+
+    private static string RenderHtml(string fileName, string title, Dictionary&lt;string, string&gt; values)
+    {
+        string content = Fill(Read(fileName), values, encode: true);
+
+        return Read("Layout.html")
+            .Replace("{{Title}}", WebUtility.HtmlEncode(title))
+            .Replace("{{Content}}", content);
+    }
+
+    private static string Fill(string template, Dictionary&lt;string, string&gt; values, bool encode)
+    {
+        foreach (var value in values)
+            template = template.Replace("{{" + value.Key + "}}", encode ? WebUtility.HtmlEncode(value.Value) : value.Value);
+
+        return template;
+    }
+
+    private static string Read(string fileName)
+    {
+        string resourceName = $"MyApp.Application.Templates.Email.{fileName}";
+
+        using Stream stream = typeof(EmailTemplates).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"The email template '{fileName}' was not found.");
+
+        using StreamReader reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+}</code></pre>
+</div>
+
+<blockquote>The HTML body is HTML-encoded on substitution so a name like <code>O'Brien &amp; Co</code> can never break out of the markup; the plain-text body is filled unencoded since it has no markup to break. Both templates need to be marked as <code>&lt;EmbeddedResource&gt;</code> in the <code>.csproj</code> (or just dropped under a folder with a wildcard include), otherwise <code>GetManifestResourceStream</code> comes back null at runtime instead of failing the build.</blockquote>
+
+<h2>Sending: SMTP client wrapped behind an interface</h2>
+<p>Same shape as <a href="jwt-auth.html">password hashing</a> — wrap the third-party library (MailKit here) behind a one-method interface so the rest of the app never imports MailKit directly, and swapping providers later touches one class.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IEmailSender.cs (Domain) + EmailSender.cs (Infrastructure)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IEmailSender
+{
+    Task&lt;bool&gt; SendAsync(EmailMessage message);
+}
+
+public class EmailSender : IEmailSender
+{
+    private const int TimeoutInMilliseconds = 10_000;
+
+    private readonly EmailSettings _settings; // bound via the Options pattern, see Strongly-Typed Configuration
+    private readonly ILogger&lt;EmailSender&gt; _logger;
+
+    public EmailSender(EmailSettings settings, ILogger&lt;EmailSender&gt; logger)
+    {
+        _settings = settings;
+        _logger = logger;
+    }
+
+    public async Task&lt;bool&gt; SendAsync(EmailMessage message)
+    {
+        try
+        {
+            using var client = new SmtpClient { Timeout = TimeoutInMilliseconds };
+            await client.ConnectAsync(_settings.Host, _settings.Port, SecureSocketOptions.Auto);
+
+            if (!string.IsNullOrWhiteSpace(_settings.Username))
+                await client.AuthenticateAsync(_settings.Username, _settings.Password);
+
+            await client.SendAsync(message.ToMimeMessage(_settings));
+            await client.DisconnectAsync(true);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            // swallow and report false rather than let a flaky mail server take down
+            // the request that triggered the email (a sign-up should still succeed
+            // even if the confirmation mail happens to fail to send)
+            _logger.LogError(exception, "Sending the email \"{Subject}\" to {Recipient} failed.", message.Subject, message.ToEmail);
+            return false;
+        }
+    }
+}</code></pre>
+</div>
+
+<p><code>EmailService</code> sits above this as the application-facing API, translating business intent ("send the enrollment confirmation to this person") into a filled-in <code>EmailTemplates</code> call plus a <code>SendAsync</code>:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IEmailService.cs + EmailService.cs (Application)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IEmailService
+{
+    Task&lt;bool&gt; SendEnrollmentConfirmationAsync(string email, string fullName, string link);
+    Task&lt;bool&gt; SendWithdrawalConfirmationAsync(string email, string fullName, string link);
+    Task&lt;bool&gt; SendPasswordSetupAsync(string email, string fullName, string link);
+}
+
+public class EmailService : IEmailService
+{
+    private readonly IEmailSender _emailSender;
+    public EmailService(IEmailSender emailSender) => _emailSender = emailSender;
+
+    public async Task&lt;bool&gt; SendEnrollmentConfirmationAsync(string email, string fullName, string link)
+        => await _emailSender.SendAsync(EmailTemplates.EnrollmentConfirmation(email, fullName, link));
+
+    // the other two methods are one-liners in the same shape
+}</code></pre>
+</div>
+
+<h2>Generic confirm-by-link token flow</h2>
+<p>Several actions in the app ("confirm your enrollment", "confirm you want to cancel", "set up your password") all follow the same shape: generate a random token, email a link containing it, and only touch the database once that link is actually clicked. Rather than writing that loop three times, an abstract generic base class owns the token lifecycle and each concrete service only fills in <em>what email to send</em> and <em>what to do once the token comes back</em>.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IConfirmationService.cs + ConfirmationService.cs (Application)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IConfirmationService&lt;TRequest&gt;
+{
+    Task SendConfirmationAsync(TRequest request);
+    Task UseConfirmationAsync(string token);
+}
+
+public abstract class ConfirmationService&lt;TRequest&gt; : IConfirmationService&lt;TRequest&gt; where TRequest : class
+{
+    // in-memory, process-local store: fine for a confirmation link that expires in
+    // minutes; a multi-instance deployment would back this with a cache like Redis instead
+    private readonly ConcurrentDictionary&lt;string, ConfirmationDTO&lt;TRequest&gt;&gt; _confirmations = new();
+
+    protected readonly IServiceScopeFactory ServiceScopeFactory;
+
+    protected abstract double ExpiryMinutes { get; }
+    protected abstract string MailError { get; }
+    protected abstract string TokenError { get; }
+
+    protected ConfirmationService(IServiceScopeFactory serviceScopeFactory)
+        => ServiceScopeFactory = serviceScopeFactory;
+
+    public async Task SendConfirmationAsync(TRequest request)
+    {
+        byte[] bytes = RandomNumberGenerator.GetBytes(16);
+        string token = Convert.ToHexString(bytes).ToLower();
+
+        using AsyncServiceScope scope = ServiceScopeFactory.CreateAsyncScope();
+        if (!await SendEmailAsync(scope, request, token))
+            throw new ArgumentException(MailError);
+
+        _confirmations[token] = new ConfirmationDTO&lt;TRequest&gt;(request, DateTime.UtcNow.AddMinutes(ExpiryMinutes));
+    }
+
+    public async Task UseConfirmationAsync(string token)
+    {
+        TRequest? request = _confirmations.Remove(token, out var confirmation) && !confirmation.HasExpired()
+            ? confirmation.Request : null;
+
+        if (request is null)
+            throw new ArgumentException(TokenError);
+
+        using AsyncServiceScope scope = ServiceScopeFactory.CreateAsyncScope();
+        await ProcessConfirmationAsync(scope, request);
+    }
+
+    protected abstract Task&lt;bool&gt; SendEmailAsync(AsyncServiceScope scope, TRequest request, string token);
+    protected abstract Task ProcessConfirmationAsync(AsyncServiceScope scope, TRequest request);
+}</code></pre>
+</div>
+
+<p>A concrete implementation only decides what email to send and what database write to make once the link is confirmed — the token generation, expiry, and one-time-use removal are inherited for free:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EnrollmentConfirmationService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class EnrollmentConfirmationService : ConfirmationService&lt;EnrollmentRequest&gt;
+{
+    protected override double ExpiryMinutes => 15;
+    protected override string MailError => "The confirmation email could not be sent. Please try enrolling again.";
+    protected override string TokenError => "No pending enrollment was found for this link.";
+
+    public EnrollmentConfirmationService(IServiceScopeFactory serviceScopeFactory) : base(serviceScopeFactory) { }
+
+    protected override async Task&lt;bool&gt; SendEmailAsync(AsyncServiceScope scope, EnrollmentRequest request, string token)
+    {
+        var emailService = scope.ServiceProvider.GetRequiredService&lt;IEmailService&gt;();
+        return await emailService.SendEnrollmentConfirmationAsync(
+            request.Email!, request.FullName!, $"https://localhost:4200/confirm-enrollment/{token}");
+    }
+
+    protected override async Task ProcessConfirmationAsync(AsyncServiceScope scope, EnrollmentRequest request)
+    {
+        // the one write that only happens once the link is actually clicked
+        var repository = scope.ServiceProvider.GetRequiredService&lt;IEnrollmentRepository&gt;();
+        await repository.CreateAsync(request);
+    }
+}</code></pre>
+</div>
+
+<blockquote>
+<p>Why a scope factory instead of injecting the repository directly: <code>ConfirmationService&lt;TRequest&gt;</code> is registered as a singleton (it has to be, to hold the in-memory dictionary across requests), but repositories and the <code>DbContext</code> are scoped. <code>IServiceScopeFactory.CreateAsyncScope()</code> is the standard way for a singleton to safely resolve scoped dependencies on demand — one fresh scope per confirmation attempt, disposed right after, rather than capturing a scoped service for the service's entire lifetime.</p>
+<p>Why the DB write happens in <code>ProcessConfirmationAsync</code> and not in <code>SendConfirmationAsync</code>: an unconfirmed enrollment should never exist in the database at all. If the request were saved immediately and only "confirmed" with a boolean flag later, a user who never clicks the link leaves orphaned, half-finished rows behind that something else has to clean up. Holding the pending request in memory means an ignored confirmation email just quietly expires and leaves nothing to clean up.</p>
+</blockquote>
+
+<p>The controller side is a small, generic pair of endpoints — one to kick off a confirmation, one to consume the token:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>usage in a controller</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[HttpPost]
+public async Task&lt;IActionResult&gt; RequestEnrollmentAsync([FromBody] EnrollmentRequest request)
+{
+    await _confirmationService.SendConfirmationAsync(request);
+    return Ok(ApiResponse&lt;object&gt;.Ok(message: "Check your email to confirm."));
+}
+
+[HttpPost("Confirm/{token}")]
+public async Task&lt;IActionResult&gt; ConfirmEnrollmentAsync(string token)
+{
+    await _confirmationService.UseConfirmationAsync(token);
+    return Ok(ApiResponse&lt;object&gt;.Ok(message: "Enrollment confirmed."));
+}</code></pre>
+</div>
+
+<p>Both thrown <code>ArgumentException</code>s (bad or expired token, mail delivery failure) fall straight through to the same <a href="api-response.html">try/catch → ApiResponse</a> handling every other endpoint already uses, so no special error plumbing is needed here either.</p>
+
+<h3>When this pattern is worth reaching for</h3>
+<ul>
+  <li>Any "confirm via emailed link" flow where you don't want an unconfirmed row sitting in the database.</li>
+  <li>A single-instance deployment (or one where "lost confirmations on restart" is an acceptable trade-off) — the token store is in-memory and does not survive a restart or scale-out past one instance.</li>
+  <li>Short-lived confirmations (minutes, not days) — there's no background sweep for expired entries here; they're simply treated as invalid on lookup and left to be garbage-collected as the dictionary turns over.</li>
+</ul>
+
