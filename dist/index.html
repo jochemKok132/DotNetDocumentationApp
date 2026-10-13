@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layered Architecture &amp; DI · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section" open>
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html" class="active" aria-current="page">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Layered Architecture &amp; DI Registration</h1>
+<p class="lede">A clean split into API / Application / Domain / Infrastructure layers, where each layer registers its own services through an extension method. <code>Program.cs</code> stays a short, readable list of intent.</p>
+
+<h2>The layers</h2>
+<ul>
+  <li><strong>Domain</strong> — entities, enums, and repository/service <em>interfaces</em>. No dependencies on anything else.</li>
+  <li><strong>Application</strong> — business logic (services), DTOs, validation, mapping extensions. Depends only on Domain.</li>
+  <li><strong>Shared</strong> — the DTOs and contracts that cross a process boundary: request/response shapes a controller returns and a frontend deserializes. Referenced by both API and every frontend project; references nothing else in the solution.</li>
+  <li><strong>Infrastructure</strong> — EF Core, repository implementations, external integrations (hashing, email, etc). Implements Domain's interfaces.</li>
+  <li><strong>API</strong> — controllers, auth wiring, Swagger, rate limiting. Depends on Application + Infrastructure.</li>
+</ul>
+
+<h2>Why Shared is its own project</h2>
+<p>Application's DTOs are internal to the backend — a service can return whatever shape is convenient. <strong>Shared</strong> is different: it's the contract. Every frontend in the solution (Blazor, Angular, a WinForms app, a CLI tool) references it directly and deserializes exactly what the API serializes, with zero duplication of the DTO shape across projects.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>project references</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-text">YourApp.API             -> YourApp.Application, YourApp.Infrastructure, YourApp.Shared
+YourApp.Application      -> YourApp.Domain, YourApp.Shared
+YourApp.UI (Blazor)      -> YourApp.Shared   (never touches Application/Infrastructure directly)
+YourApp.WebClient (Angular) -> generates its TS types from YourApp.Shared, or duplicates by hand
+YourApp.Cli               -> YourApp.Shared, YourApp.Application (see Building a CLI Tool)</code></pre>
+</div>
+
+<p>A DTO belongs in Shared the moment more than one project needs to agree on its shape — a request body, a response body, an enum sent over the wire. Everything else (entities, internal service-to-service DTOs, mapping extensions) stays in Domain/Application where only the backend can see it.</p>
+
+<h2>Each layer exposes a "RegisterX" extension</h2>
+<p>Rather than dumping every <code>AddScoped</code> call into <code>Program.cs</code>, each project gets one static <code>Dependencies</code> class with a public entry point and private helpers per concern.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class Dependencies
+{
+    public static IServiceCollection RegisterApplication(this IServiceCollection services)
+    {
+        services.RegisterServices();
+        return services;
+    }
+
+    private static IServiceCollection RegisterServices(this IServiceCollection services)
+    {
+        services.AddScoped&lt;ITokenService, TokenService&gt;();
+        services.AddScoped&lt;IAuthService, AuthService&gt;();
+        services.AddScoped&lt;IResourceService, ResourceService&gt;();
+        return services;
+    }
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Infrastructure/Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class Dependencies
+{
+    public static IServiceCollection RegisterInfrastructure(this IServiceCollection services, string connectionString)
+    {
+        services.RegisterPersistence(connectionString);
+        services.RegisterRepositories();
+        services.RegisterHelpers();
+        return services;
+    }
+
+    private static IServiceCollection RegisterPersistence(this IServiceCollection services, string connectionString)
+    {
+        services.AddDbContext&lt;AppDbContext&gt;(options =>
+        {
+            options.UseSqlServer(connectionString, sql =>
+                sql.MigrationsHistoryTable("Migrations"));
+        });
+        return services;
+    }
+
+    private static IServiceCollection RegisterRepositories(this IServiceCollection services)
+    {
+        // open generic registration covers every closed IRepository&lt;T&gt;
+        services.AddScoped(typeof(IRepository&lt;&gt;), typeof(Repository&lt;&gt;));
+        services.AddScoped&lt;IUserRepository, UserRepository&gt;();
+        return services;
+    }
+
+    private static IServiceCollection RegisterHelpers(this IServiceCollection services)
+    {
+        services.AddScoped&lt;IPassword, Password&gt;();
+        return services;
+    }
+}</code></pre>
+</div>
+
+<h2>Program.cs reads as a checklist</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.RegisterAPI(builder.Configuration);
+builder.Services.RegisterApplication();
+builder.Services.RegisterInfrastructure(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("Missing connection string"));
+
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService&lt;AppDbContext&gt;();
+    context.Database.Migrate();
+}
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger(o => o.RouteTemplate = "{documentName}/specifications.json");
+    app.UseSwaggerUI(o =>
+    {
+        o.RoutePrefix = "api";
+        o.SwaggerEndpoint("specifications.json", "API");
+    });
+}
+
+app.UseCors();
+app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseRateLimiter();
+app.UseExceptionHandler("/Error");
+app.MapControllers();
+app.Run();</code></pre>
+</div>
+
+<blockquote>Why bother: each layer's registration is testable and reviewable in isolation, and adding a new service means touching one small private method instead of a growing <code>Program.cs</code>.</blockquote>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

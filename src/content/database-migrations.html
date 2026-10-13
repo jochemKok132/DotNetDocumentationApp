@@ -1,0 +1,135 @@
+<h1>Migrations &amp; Transactions</h1>
+<p class="lede">The EF Core CLI workflow for evolving the schema safely, plus explicit transactions for the operations that touch more than one table and need to succeed or fail together.</p>
+
+<h2>The migration workflow</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>shell</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-bash"># one-time: install the CLI tool
+dotnet tool install --global dotnet-ef
+
+# after changing an entity or a Configuration class:
+dotnet ef migrations add AddedResourceTable \
+  --project YourApp.Infrastructure \
+  --startup-project YourApp.API
+
+# review the generated file before applying it — see below
+dotnet ef database update \
+  --project YourApp.Infrastructure \
+  --startup-project YourApp.API
+
+# undo the last migration that hasn't been applied yet
+dotnet ef migrations remove --project YourApp.Infrastructure --startup-project YourApp.API</code></pre>
+</div>
+
+<h2>Always read the generated migration before running it</h2>
+<p>EF Core's diff is usually right, but it can't know your intent — renaming a column looks identical to EF as "drop old column, add new column", which silently loses data. Catch this in the generated file, not in production.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Migrations/…_RenamedColumn.cs — wrong (data loss) vs right</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">// EF's default guess for renaming Name -> FullName:
+migrationBuilder.DropColumn(name: "Name", table: "Users");
+migrationBuilder.AddColumn&lt;string&gt;(name: "FullName", table: "Users");
+// ^ every existing row loses its name
+
+// what you actually want — edit the generated file to say this instead:
+migrationBuilder.RenameColumn(
+    name: "Name",
+    table: "Users",
+    newName: "FullName");</code></pre>
+</div>
+
+<h2>Applying migrations at startup vs. as a separate step</h2>
+<p>The earlier <a href="index.html">Layered Architecture</a> page's <code>Program.cs</code> calls <code>context.Database.Migrate()</code> on every boot — convenient for a small app or a single-instance deployment, since the schema is always in sync with the code. It's the wrong call once you're running multiple API instances behind a load balancer (they'd race to migrate) or want a deploy to fail loudly on a bad migration <em>before</em> traffic hits the new code.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>CI/CD: migrate as its own pipeline step instead</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-bash"># in the deploy workflow, before the new app version starts serving traffic
+dotnet ef database update \
+  --project YourApp.Infrastructure \
+  --startup-project YourApp.API \
+  --connection "$PRODUCTION_CONNECTION_STRING"</code></pre>
+</div>
+
+<h2>Explicit transactions</h2>
+<p>A single <code>SaveChangesAsync()</code> call is already atomic. You need an explicit transaction when an operation spans <em>multiple</em> <code>SaveChangesAsync()</code> calls, or mixes EF Core with a raw SQL command, and all of it needs to commit or roll back together.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>TransferService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task TransferStockAsync(Guid fromWarehouseId, Guid toWarehouseId, Guid productId, int quantity)
+{
+    await using var transaction = await _context.Database.BeginTransactionAsync();
+
+    try
+    {
+        var source = await _stockRepository.GetAsync(fromWarehouseId, productId);
+        if (source.Quantity &lt; quantity)
+            throw new ArgumentException("Not enough stock at source warehouse.");
+
+        source.Quantity -= quantity;
+        await _context.SaveChangesAsync();
+
+        var destination = await _stockRepository.GetOrCreateAsync(toWarehouseId, productId);
+        destination.Quantity += quantity;
+        await _context.SaveChangesAsync();
+
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        throw;
+    }
+}</code></pre>
+</div>
+
+<h2>Connection resiliency</h2>
+<p>A transient network blip shouldn't fail a request outright. <code>EnableRetryOnFailure</code> makes EF Core retry a failed connection attempt automatically — but it changes how you must write explicit transactions, since a retry has to redo the whole transaction, not resume it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Infrastructure/Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">services.AddDbContext&lt;AppDbContext&gt;(options =>
+{
+    options.UseSqlServer(connectionString, sql =>
+    {
+        sql.MigrationsHistoryTable("Migrations");
+        sql.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null);
+    });
+});</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>explicit transaction + retry — use an execution strategy</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">var strategy = _context.Database.CreateExecutionStrategy();
+
+await strategy.ExecuteAsync(async () =>
+{
+    await using var transaction = await _context.Database.BeginTransactionAsync();
+
+    source.Quantity -= quantity;
+    await _context.SaveChangesAsync();
+    destination.Quantity += quantity;
+    await _context.SaveChangesAsync();
+
+    await transaction.CommitAsync();
+});</code></pre>
+</div>
+
+<blockquote>With <code>EnableRetryOnFailure</code> on, EF Core throws at startup if you begin a transaction manually without wrapping it in <code>CreateExecutionStrategy().ExecuteAsync(...)</code> — the retry logic needs to own the whole unit of work so it can replay it cleanly from the start on failure.</blockquote>

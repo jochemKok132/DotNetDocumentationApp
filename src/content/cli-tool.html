@@ -1,0 +1,117 @@
+<h1>Building a CLI Tool</h1>
+<p class="lede">Two ways to parse arguments — a zero-dependency approach for a quick script, and <code>System.CommandLine</code> for anything with subcommands, help text, or options that need validation — plus how to reuse the same DI/service layer from your API in a console app, and how to ship the result as an installable tool.</p>
+
+<h2>Zero-dependency: a tiny flag parser</h2>
+<p>For a one-off script this is often all you need — no package, no learning curve. Good enough for a handful of <code>--flag value</code> pairs.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">var flags = ParseArgs(args);
+
+string input = flags.GetValueOrDefault("--input") ?? throw new ArgumentException("--input is required");
+bool verbose = flags.ContainsKey("--verbose");
+
+Console.WriteLine($"Processing {input} (verbose: {verbose})");
+
+static Dictionary&lt;string, string?&gt; ParseArgs(string[] args)
+{
+    var result = new Dictionary&lt;string, string?&gt;();
+
+    for (int i = 0; i &lt; args.Length; i++)
+    {
+        if (!args[i].StartsWith("--")) continue;
+
+        var next = i + 1 &lt; args.Length ? args[i + 1] : null;
+        var hasValue = next != null &amp;&amp; !next.StartsWith("--");
+
+        result[args[i]] = hasValue ? next : null;
+        if (hasValue) i++;
+    }
+
+    return result;
+}</code></pre>
+</div>
+
+<h2>System.CommandLine: subcommands, options, built-in help</h2>
+<p>Worth reaching for once a tool grows past a handful of flags. It generates <code>--help</code> output, validates required options, and supports nested subcommands (<code>mytool users create ...</code>) without hand-rolled parsing.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">// dotnet add package System.CommandLine --prerelease
+
+var inputOption = new Option&lt;string&gt;("--input", "-i") { Required = true };
+var verboseOption = new Option&lt;bool&gt;("--verbose", "-v");
+
+var importCommand = new Command("import", "Import records from a file");
+importCommand.Options.Add(inputOption);
+importCommand.Options.Add(verboseOption);
+importCommand.SetAction(parseResult =>
+{
+    var input = parseResult.GetValue(inputOption);
+    var verbose = parseResult.GetValue(verboseOption);
+    Console.WriteLine($"Importing {input} (verbose: {verbose})");
+});
+
+var root = new RootCommand("YourApp CLI") { importCommand };
+return root.Parse(args).Invoke();</code></pre>
+</div>
+
+<h2>Reusing the app's service layer</h2>
+<p>Same registration pattern as the API and Blazor projects (see <a href="layered-architecture.html">Layered Architecture &amp; DI</a>) — build a minimal <code>ServiceCollection</code>, register Application/Infrastructure, resolve what the command needs. The CLI becomes a thin third front-end over the exact same business logic, not a separate reimplementation.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">var configuration = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json", optional: false)
+    .Build();
+
+var services = new ServiceCollection();
+services.RegisterApplication();
+services.RegisterInfrastructure(configuration.GetConnectionString("DefaultConnection")!);
+
+await using var provider = services.BuildServiceProvider();
+var resourceService = provider.GetRequiredService&lt;IResourceService&gt;();
+
+var resources = await resourceService.GetAllAsync();
+foreach (var r in resources)
+    Console.WriteLine($"{r.Id}: {r.Name}");</code></pre>
+</div>
+
+<h2>Shipping it as an installable tool</h2>
+<p>Package the console app as a .NET global tool so it's runnable as a plain command after <code>dotnet tool install</code> — no <code>dotnet run</code>, no remembering the project path.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>YourApp.Cli.csproj</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-xml">&lt;PropertyGroup&gt;
+  &lt;OutputType&gt;Exe&lt;/OutputType&gt;
+  &lt;TargetFramework&gt;net10.0&lt;/TargetFramework&gt;
+  &lt;PackAsTool&gt;true&lt;/PackAsTool&gt;
+  &lt;ToolCommandName&gt;yourapp&lt;/ToolCommandName&gt;
+  &lt;PackageOutputPath&gt;./nupkg&lt;/PackageOutputPath&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>shell</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-bash">dotnet pack
+dotnet tool install --global --add-source ./nupkg YourApp.Cli
+
+yourapp import --input data.csv --verbose</code></pre>
+</div>
+
+<blockquote>Exit codes matter for CLI tools in a way they don't for a web API: return a non-zero exit code on failure (<code>Environment.Exit(1)</code> or a non-zero return from <code>Main</code>) so the tool composes correctly in shell scripts and CI pipelines — a script checking <code>$?</code> or <code>if yourapp import ...; then</code> depends on it.</blockquote>

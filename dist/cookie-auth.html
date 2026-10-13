@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HttpOnly Cookie Authentication · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html" class="active" aria-current="page">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>HttpOnly Cookie Authentication</h1>
+<p class="lede">The <a href="jwt-auth.html">JWT Authentication</a> page stores the token in <code>sessionStorage</code> and attaches it manually to every request — simple, and fine for many apps, but readable by any JavaScript running on the page (including an injected script from an XSS bug). An <code>HttpOnly</code> cookie is invisible to JavaScript entirely; the browser attaches it automatically and the server is the only thing that can read it.</p>
+
+<h2>Issuing the cookie on login</h2>
+<p>Same <code>TokenService</code> as the JWT page — the token itself doesn't change shape. What changes is where it's put: instead of returning it in the response body for the client to store, it's written directly into a cookie on the response.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>AuthController.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[HttpPost("login")]
+public async Task&lt;IActionResult&gt; LoginAsync(LoginRequest request)
+{
+    var token = await _authService.LoginAsync(request); // throws AuthenticationException on failure
+
+    Response.Cookies.Append("auth_token", token.JWT, new CookieOptions
+    {
+        HttpOnly = true,               // invisible to document.cookie / JS
+        Secure = true,                 // HTTPS only — never send it over plain HTTP
+        SameSite = SameSiteMode.Strict, // browser withholds it on cross-site requests
+        Expires = token.ExpiresOn,
+        Path = "/"
+    });
+
+    return Ok(ApiResponse&lt;object&gt;.Ok()); // no token in the body — nothing for JS to read
+}
+
+[HttpPost("logout")]
+public IActionResult Logout()
+{
+    Response.Cookies.Delete("auth_token");
+    return Ok(ApiResponse&lt;object&gt;.Ok());
+}</code></pre>
+</div>
+
+<h2>Reading the cookie instead of the Authorization header</h2>
+<p>JWT bearer auth expects the token in an <code>Authorization: Bearer ...</code> header by default. <code>OnMessageReceived</code> lets you pull it from the cookie instead, so the rest of the JWT bearer pipeline — validation, claims, <code>[Authorize]</code> — works unchanged.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters { /* same as before */ };
+
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            if (context.Request.Cookies.TryGetValue("auth_token", out var token))
+                context.Token = token;
+
+            return Task.CompletedTask;
+        }
+    };
+});</code></pre>
+</div>
+
+<h2>CSRF: the trade-off that comes with cookies</h2>
+<p>A header-based token (like the JWT-in-storage approach) is naturally immune to CSRF — a malicious site can't read your <code>sessionStorage</code> to forge the header. A cookie is sent automatically by the browser on <em>any</em> request to your domain, including ones triggered by a malicious page, so you need an explicit CSRF defense. <code>SameSite=Strict</code> handles most of it for a same-site app; for cross-site scenarios (a separate frontend domain calling the API), add a double-submit token.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>double-submit CSRF token — client sends it back in a header</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">// on login, also set a *readable* (non-HttpOnly) token the frontend echoes back
+Response.Cookies.Append("csrf_token", csrfToken, new CookieOptions
+{
+    HttpOnly = false, // JS needs to read this one, to put it in a header
+    Secure = true,
+    SameSite = SameSiteMode.Strict
+});
+
+// on every mutating request, require the header to match the cookie
+[HttpPost]
+[Authorize]
+public IActionResult CreateResource([FromBody] CreateResourceRequest request)
+{
+    var cookieToken = Request.Cookies["csrf_token"];
+    var headerToken = Request.Headers["X-CSRF-Token"].ToString();
+
+    if (string.IsNullOrEmpty(cookieToken) || cookieToken != headerToken)
+        return Forbid();
+
+    // ... proceed
+}</code></pre>
+</div>
+
+<h2>Client side: nothing to store, nothing to attach</h2>
+<p>This is the appeal — compare to the whole <a href="blazor-auth-state.html">JWT Auth State</a> page's worth of session storage, claims parsing, and a <code>DelegatingHandler</code>. With cookies, the browser does that work:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>fetch/HttpClient — no manual header needed</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-javascript">// the browser attaches the HttpOnly cookie automatically — nothing to add here
+fetch("/api/resource", {
+    method: "POST",
+    credentials: "include", // required for cross-origin requests to send cookies
+    headers: { "X-CSRF-Token": csrfTokenFromCookie },
+    body: JSON.stringify(data)
+});</code></pre>
+</div>
+
+<blockquote>Pick cookies when the frontend and API share a domain (or close subdomains) and you want the smallest possible XSS blast radius. Pick JWT-in-storage (the <a href="jwt-auth.html">JWT Authentication</a> page) when the API serves multiple, unrelated frontend origins, or a native/CLI client that has no cookie jar at all.</blockquote>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

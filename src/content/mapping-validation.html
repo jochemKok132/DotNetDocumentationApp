@@ -1,0 +1,144 @@
+<h1>Mapping &amp; Validation Extensions</h1>
+<p class="lede">Two small conventions that replace AutoMapper and FluentValidation with plain extension methods — no reflection, no config, fully debuggable.</p>
+
+<h2>Mapping: <code>ToDto()</code> extension methods</h2>
+<p>Each entity-to-DTO conversion lives as an extension method grouped by feature area, not as a giant central mapper class. It reads left-to-right at the call site (<code>entity.ToDto()</code>) and each mapping is a plain method you can step through in the debugger.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Extensions/ResourceMappingExtensions.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class ResourceMappingExtensions
+{
+    public static CategoryDto ToDto(this Category category) => new()
+    {
+        Id = category.Id,
+        Name = category.Name,
+        Description = category.Description,
+        IsActive = category.IsActive
+    };
+
+    public static RatingDto ToDto(this Rating rating) => new()
+    {
+        UserId = rating.UserId,
+        CategoryName = rating.Category?.Name ?? "Unknown",
+        CurrentRating = rating.CurrentRating,
+        MatchCount = rating.MatchCount
+    };
+}</code></pre>
+</div>
+
+<p>Used directly in a service method:</p>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>usage</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task&lt;IEnumerable&lt;ActivityOverviewResponse&gt;&gt; GetUpcomingAsync()
+{
+    var activities = await _repository.GetUpcomingAsync();
+    return activities.Select(a => a.ToOverviewResponse());
+}</code></pre>
+</div>
+
+<h2>Validation: <code>Validate()</code> extension methods on request DTOs</h2>
+<p>Instead of a validation framework, each request type gets a static validator class with a <code>Validate()</code> extension that throws on the first problem it finds. Services call it as the very first line of the method, so invalid input never reaches business logic.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Validations/SignUp/SignUpValidation.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class SignUpValidation
+{
+    public static void Validate(this SignUpRequest request, Activity? activity, Guid userId, int totalSignUps)
+    {
+        if (activity is null)
+            throw new KeyNotFoundException("Activity not found.");
+
+        if (activity.StartsAt &lt;= DateTime.UtcNow)
+            throw new ArgumentException("Sign-up is closed for this activity.");
+
+        if (activity.MaxParticipants.HasValue && totalSignUps &gt;= activity.MaxParticipants)
+            throw new ArgumentException("This activity is full.");
+    }
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>usage in a service</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task SignUpAsync(SignUpRequest request, Guid userId)
+{
+    var activity = await _activityRepository.GetByIdAsync(request.ActivityId);
+    var totalSignUps = await _signUpRepository.CountByActivityIdAsync(request.ActivityId);
+
+    request.Validate(activity, userId, totalSignUps); // throws on failure
+
+    await _signUpRepository.AddAsync(request.ToSignUp(userId));
+}</code></pre>
+</div>
+
+<blockquote>The controller layer already has a <code>try/catch</code> around every action (see <a href="api-response.html">ApiResponse &amp; Controllers</a>), so a thrown <code>ArgumentException</code> or <code>KeyNotFoundException</code> from a validator naturally becomes a 400 or 404 with a useful message — no extra plumbing needed.</blockquote>
+
+<h2>Bonus: explicit enum mapping between layers</h2>
+<p>Domain enums and their API-facing DTO counterparts are kept as two separate enums, converted by a small <code>switch</code>-based extension. This means the Domain enum can be reordered or renamed freely without silently shifting the API's wire values, and a missing case is a compile-time-adjacent <code>ArgumentOutOfRangeException</code> instead of a mystery.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EmployeeRoleMapping.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class EmployeeRoleMapping
+{
+    public static EmployeeRole ToDomain(this EmployeeRoleDto role) => role switch
+    {
+        EmployeeRoleDto.Admin => EmployeeRole.Admin,
+        EmployeeRoleDto.Manager => EmployeeRole.Manager,
+        EmployeeRoleDto.Cashier => EmployeeRole.Cashier,
+        EmployeeRoleDto.None => EmployeeRole.None,
+        _ => throw new ArgumentOutOfRangeException(nameof(role))
+    };
+
+    public static EmployeeRoleDto ToDto(this EmployeeRole role) => role switch
+    {
+        EmployeeRole.Admin => EmployeeRoleDto.Admin,
+        EmployeeRole.Manager => EmployeeRoleDto.Manager,
+        EmployeeRole.Cashier => EmployeeRoleDto.Cashier,
+        EmployeeRole.None => EmployeeRoleDto.None,
+        _ => throw new ArgumentOutOfRangeException(nameof(role))
+    };
+}</code></pre>
+</div>
+
+<h2>Bonus: validating an uploaded file</h2>
+<p>Same <code>Validate()</code> extension convention, applied to a request that carries an <code>IFormFile</code>. Check content type against an allow-list (never trust the file extension) and size before the file ever reaches a service or gets written anywhere — this pairs with the <a href="http-service.html#">multipart upload</a> pattern on the client side.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>CreateResourceRequestValidation.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class CreateResourceRequestValidation
+{
+    private static readonly List&lt;string&gt; ValidImageTypes = ["image/png", "image/jpeg", "image/webp"];
+
+    public static void Validate(this CreateResourceRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            throw new ArgumentException("Name is required.");
+
+        if (request.Image.Length &lt;= 0)
+            throw new ArgumentException("Invalid file size.");
+
+        if (!ValidImageTypes.Contains(request.Image.ContentType, StringComparer.OrdinalIgnoreCase))
+            throw new ArgumentException("Invalid file type.");
+
+        if (request.StartDate &gt;= request.EndDate)
+            throw new ArgumentException("End date must be after start date.");
+    }
+}</code></pre>
+</div>

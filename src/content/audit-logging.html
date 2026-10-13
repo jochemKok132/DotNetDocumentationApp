@@ -1,0 +1,122 @@
+<h1>Field-Level Audit Logging</h1>
+<p class="lede">Instead of logging "Product updated", log <em>what changed</em>: a reflection-based diff between the old and new state produces a human-readable list of field changes, which gets stored as the audit log entry.</p>
+
+<h2>The differ</h2>
+<p>Walks every public property that exists on both the old and new object, skips anything unchanged, and special-cases three tricky shapes: byte arrays (images — report changed/unchanged, never dump bytes), collections of related entities (report added/removed items instead of a useless "changed"), and sensitive fields you never want in a log.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>DifferenceFinder.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class DifferenceFinder
+{
+    public static List&lt;string&gt; FindDifferences&lt;TNew, TOld&gt;(this TNew newValues, TOld oldValues)
+    {
+        var differences = new List&lt;string&gt;();
+        var oldProps = typeof(TOld).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var newProps = typeof(TNew).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+        foreach (var oldProp in oldProps)
+        {
+            var newProp = newProps.FirstOrDefault(p => p.Name == oldProp.Name);
+            if (newProp == null) continue;
+
+            var oldRaw = oldProp.GetValue(oldValues);
+            var newRaw = newProp.GetValue(newValues);
+
+            if (oldProp.IsEnumerable() || newProp.IsEnumerable())
+            {
+                if (oldRaw is byte[] || newRaw is byte[])
+                {
+                    var same = ((byte[]?)oldRaw)?.AsSpan().SequenceEqual((byte[]?)newRaw ?? []) ?? newRaw is null;
+                    if (!same) differences.Add($"{oldProp.Name}: Changed Image.");
+                    continue;
+                }
+
+                var oldItems = ToItems(oldRaw);
+                var newItems = ToItems(newRaw);
+                // skip lists of nested entities/DTOs entirely — too noisy to diff meaningfully
+                if (oldItems.Concat(newItems).Any(IsModel)) continue;
+
+                var oldTexts = oldItems.Select(i => i?.ToString() ?? "-").ToList();
+                var newTexts = newItems.Select(i => i?.ToString() ?? "-").ToList();
+                var added = newTexts.Except(oldTexts).ToList();
+                var removed = oldTexts.Except(newTexts).ToList();
+
+                if (added.Count > 0 || removed.Count > 0)
+                    differences.Add($"{oldProp.Name}: Added: [{string.Join(", ", added)}]. Removed: [{string.Join(", ", removed)}]");
+                continue;
+            }
+
+            var oldValue = oldRaw?.ToString() ?? "-";
+            var newValue = newRaw?.ToString() ?? "-";
+
+            // never leak sensitive fields into a log
+            if (oldValue == newValue || oldProp.Name == "HashedPassword") continue;
+
+            differences.Add($"{oldProp.Name}: New: {newValue}. Old: {oldValue}");
+        }
+
+        return differences;
+    }
+
+    private static bool IsEnumerable(this PropertyInfo property)
+        => property.PropertyType != typeof(string)
+            && typeof(IEnumerable).IsAssignableFrom(property.PropertyType);
+
+    private static List&lt;object?&gt; ToItems(object? value)
+        => value is IEnumerable items ? items.Cast&lt;object?&gt;().ToList() : [];
+
+    private static bool IsModel(object? item)
+    {
+        var ns = item?.GetType().Namespace ?? "";
+        return ns.StartsWith("YourApp.Domain.Entities") || ns.StartsWith("YourApp.Application.DTOs");
+    }
+}</code></pre>
+</div>
+
+<h2>Wiring it into a service</h2>
+<p>The pattern: fetch the current entity, build the diff <em>before</em> applying the update, apply the update, then persist a log row built from that diff — all inside the same service method, so the log always reflects exactly what actually changed.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ProductService.cs — update flow</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task UpdateProductAsync(UpdateProductDto dto, Guid employeeId)
+{
+    var product = await _productRepository.GetByIdAsync(dto.Id)
+        ?? throw new KeyNotFoundException($"Product {dto.Id} not found.");
+
+    // diff BEFORE mutating, so "old" is still the persisted state
+    var log = dto.ToUpdateStockLogsDto(product, employeeId);
+
+    product.ApplyUpdate(dto);
+    await _productRepository.UpdateAsync(product);
+
+    await _stockLogsService.CreateStockLogsAsync(log);
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Mappings — turning a diff into a log DTO</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static CreateStockLogsDto ToUpdateStockLogsDto(
+    this UpdateProductDto newValues, Product oldValues, Guid employeeId)
+{
+    var changes = newValues.FindDifferences(oldValues);
+
+    return new CreateStockLogsDto
+    {
+        StockLogType = StockLogType.Updated,
+        EmployeeId = employeeId,
+        Identifier = oldValues.Barcode.ToString(),
+        Changes = changes // stored as e.g. a joined string or JSON array
+    };
+}</code></pre>
+</div>
+
+<blockquote>Because <code>FindDifferences</code> is purely reflection over property names, it works across any old/new type pair — an entity vs. its update DTO, two DTOs, whatever — as long as the property names line up. No per-entity diff code to maintain.</blockquote>

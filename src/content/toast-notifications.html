@@ -1,0 +1,193 @@
+<h1>Toast Notification Service</h1>
+<p class="lede">A small pub/sub service that lets any component or service fire a toast ("Saved!", "Session expired") without a direct reference to whatever's rendering it. One <code>NotificationHost</code> component sits in the layout and reacts to events.</p>
+
+<h2>The service</h2>
+<p>Plain C#, no UI code — just an event and a couple of methods. Registered as a singleton (or scoped, in Blazor Server) so every component sees the same instance.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>NotificationService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class NotificationService
+{
+    public event Action&lt;Notification&gt;? OnNotify;
+
+    public void Success(string message) => Notify(message, NotificationLevel.Success);
+    public void Error(string message) => Notify(message, NotificationLevel.Error);
+    public void Info(string message) => Notify(message, NotificationLevel.Info);
+
+    private void Notify(string message, NotificationLevel level)
+        => OnNotify?.Invoke(new Notification(Guid.NewGuid(), message, level));
+}
+
+public record Notification(Guid Id, string Message, NotificationLevel Level);
+
+public enum NotificationLevel { Success, Info, Error }</code></pre>
+</div>
+
+<h2>The host component — one per layout</h2>
+<p>Subscribes on init, keeps a small list of active toasts, auto-dismisses each after a few seconds, and unsubscribes on dispose so it doesn't leak when the layout is torn down.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>NotificationHost.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">@implements IDisposable
+@inject NotificationService Notifications
+
+&lt;div class="toast-stack"&gt;
+    @foreach (var n in _active)
+    {
+        &lt;div class="toast toast-@n.Level.ToString().ToLower()"&gt;
+            @n.Message
+        &lt;/div&gt;
+    }
+&lt;/div&gt;
+
+@code {
+    private readonly List&lt;Notification&gt; _active = [];
+
+    protected override void OnInitialized()
+    {
+        Notifications.OnNotify += HandleNotify;
+    }
+
+    private async void HandleNotify(Notification n)
+    {
+        _active.Add(n);
+        await InvokeAsync(StateHasChanged);
+
+        await Task.Delay(4000);
+        _active.Remove(n);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Notifications.OnNotify -= HandleNotify;
+    }
+}</code></pre>
+</div>
+
+<h2>Registration and usage</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">services.AddSingleton&lt;NotificationService&gt;();</code></pre>
+</div>
+
+<p>Drop <code>&lt;NotificationHost /&gt;</code> once in <code>MainLayout.razor</code>, then fire toasts from anywhere — a page after a failed API call, or even a background service:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>LoginPage.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">@inject NotificationService Notifications
+@inject IAuthService AuthService
+
+@code {
+    private async Task HandleLogin()
+    {
+        var response = await AuthService.LoginAsync(request);
+        if (!response.Succeeded)
+        {
+            Notifications.Error(response.Message ?? "Login failed.");
+            return;
+        }
+
+        Notifications.Success("Welcome back!");
+        Navigation.NavigateTo("/dashboard");
+    }
+}</code></pre>
+</div>
+
+<blockquote>Because the service has no dependency on any specific component, the same <code>NotificationService.Error(...)</code> call works from a page, from <a href="http-service.html">HttpService</a> itself (e.g. on every failed request), or from a background timer — anywhere DI reaches.</blockquote>
+
+<h2>Alternative: a static event, no DI at all</h2>
+<p>The DI-service version above is the more testable, more "correct" shape. In practice, a static class with a static event works just as well for a small app and is simpler to call from places that don't have easy access to DI — a static extension method, for instance. This is the shape actually used in production for Activadis:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Notifications.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class Notification
+{
+    public Guid Id { get; set; }
+    public bool HasErrored { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public bool IsDeleted { get; set; }
+    public int DurationInMs { get; set; }
+    public DateTime SendOn { get; set; }
+}
+
+public static class Notifications
+{
+    public static event Action&lt;Notification&gt;? OnNotification;
+
+    public static void AddNotification(string? message, bool hasErrored = false, int durationInMs = 2500)
+    {
+        OnNotification?.Invoke(new Notification
+        {
+            Id = Guid.NewGuid(),
+            Message = message ?? "An unexpected error occurred.",
+            HasErrored = hasErrored,
+            DurationInMs = durationInMs,
+            SendOn = DateTime.UtcNow
+        });
+    }
+}
+
+// call from literally anywhere, no injection needed:
+Notifications.AddNotification("Saved!", hasErrored: false);</code></pre>
+</div>
+
+<p>The host component marks a notification <code>IsDeleted</code> instead of removing it from the list immediately, so a click-to-dismiss handler and the auto-expiry delay can't race each other over the same list mutation.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>NotificationsComponent.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">@implements IDisposable
+
+&lt;div class="notifications"&gt;
+    @foreach (var n in notifications.Where(x =&gt; !x.IsDeleted).OrderByDescending(x =&gt; x.SendOn))
+    {
+        &lt;div @key="n.Id" class="notification @(n.HasErrored ? "notification-error" : "")"
+             @onclick="@(() =&gt; n.IsDeleted = true)"&gt;
+            &lt;p&gt;@n.Message&lt;/p&gt;
+        &lt;/div&gt;
+    }
+&lt;/div&gt;
+
+@code {
+    public List&lt;Notification&gt; notifications { get; private set; } = [];
+
+    protected override void OnInitialized()
+        =&gt; Notifications.OnNotification += OnNotification;
+
+    public void Dispose()
+        =&gt; Notifications.OnNotification -= OnNotification;
+
+    public void OnNotification(Notification notification)
+    {
+        InvokeAsync(async () =&gt;
+        {
+            notifications.Add(notification);
+            StateHasChanged();
+
+            await Task.Delay(notification.DurationInMs);
+            notifications.Remove(notification);
+            StateHasChanged();
+        });
+    }
+}</code></pre>
+</div>
+
+<blockquote>Trade-off: a static event is a form of global mutable state — every subscriber in the app shares the exact same event, which makes per-user isolation in Blazor Server (where multiple users' circuits run in the same process) impossible without extra work. Fine for Blazor WASM, where each user already gets their own process in the browser; think twice before using it in Server mode with multiple concurrent users.</blockquote>

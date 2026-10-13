@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Composable Repository Interfaces · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html" class="active" aria-current="page">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Composable Repository Interfaces</h1>
+<p class="lede">An alternative to a single <code>IRepository&lt;T&gt;</code> (see <a href="repository-pattern.html">Repository Pattern</a>): split repository capabilities into small interfaces, each gated by a matching marker interface on the entity. An entity only gets the operations its marker interfaces say it supports — there's no <code>DeleteAsync</code> sitting unused on an entity that's never deletable.</p>
+
+<h2>Entity capability markers</h2>
+<p>Plain marker interfaces in the Domain layer. An entity implements whichever combination it needs.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IEntities/*.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IEntity
+{
+    Guid Id { get; set; }
+}
+
+public interface ICreateable
+{
+    DateTime CreatedAt { get; set; }
+}
+
+public interface IUpdatable
+{
+    DateTime UpdatedAt { get; set; }
+}
+
+public interface ISoftDeletable
+{
+    bool SoftDeleted { get; set; }
+    DateTime SoftDeletedAt { get; set; }
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Product.cs — picks the capabilities it needs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class Product : IEntity, ICreateable, IUpdatable, ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public bool SoftDeleted { get; set; }
+    public DateTime SoftDeletedAt { get; set; }
+
+    public string Name { get; set; } = "";
+    // ...
+}</code></pre>
+</div>
+
+<h2>One repository interface per capability</h2>
+<p>Each generic constraint (<code>where T : ICreateable</code>, etc.) means the interface — and its EF implementation — only compiles against entities that actually support it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IEfRepository.cs + friends</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IEfRepository&lt;T&gt; where T : class, IEntity
+{
+    Task&lt;List&lt;T&gt;&gt; GetAllAsync();
+    Task&lt;T?&gt; GetByIdAsync(Guid id);
+    Task SaveChangesAsync();
+}
+
+public interface IEfCreatableRepository&lt;T&gt; where T : class, ICreateable
+{
+    Task AddAsync(T entity);
+}
+
+public interface IEfUpdatableRepository&lt;T&gt; where T : class, IUpdatable
+{
+    Task UpdateAsync(T entity);
+}
+
+public interface IEfSoftDeletableRepository&lt;T&gt; where T : class, ISoftDeletable
+{
+    Task SoftDeleteAsync(T entity);
+}</code></pre>
+</div>
+
+<h2>Implementations stamp the timestamp themselves</h2>
+<p>Because each implementation is scoped to one concern, it's the natural place to stamp <code>CreatedAt</code>/<code>UpdatedAt</code>/<code>SoftDeletedAt</code> — callers never set these manually, so they can't forget to.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EfCreatableRepository.cs / EfSoftDeletableRepository.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class EfCreatableRepository&lt;T&gt; : IEfCreatableRepository&lt;T&gt; where T : class, ICreateable
+{
+    private readonly DbSet&lt;T&gt; _dbSet;
+    private readonly AppDbContext _context;
+
+    public EfCreatableRepository(AppDbContext context)
+    {
+        _context = context;
+        _dbSet = context.Set&lt;T&gt;();
+    }
+
+    public async Task AddAsync(T entity)
+    {
+        entity.CreatedAt = DateTime.UtcNow;
+        _dbSet.Add(entity);
+        await _context.SaveChangesAsync();
+    }
+}
+
+public class EfSoftDeletableRepository&lt;T&gt; : IEfSoftDeletableRepository&lt;T&gt; where T : class, ISoftDeletable
+{
+    private readonly DbSet&lt;T&gt; _dbSet;
+    private readonly AppDbContext _context;
+
+    public EfSoftDeletableRepository(AppDbContext context)
+    {
+        _context = context;
+        _dbSet = context.Set&lt;T&gt;();
+    }
+
+    public async Task SoftDeleteAsync(T entity)
+    {
+        entity.SoftDeletedAt = DateTime.UtcNow;
+        entity.SoftDeleted = true;
+        _dbSet.Update(entity);
+        await _context.SaveChangesAsync();
+    }
+}</code></pre>
+</div>
+
+<h2>A concrete repository composes what it needs</h2>
+<p>A feature-specific repository interface inherits exactly the capability interfaces its entity supports, then the implementation composes the generic pieces (often by inheriting more than one, or by injecting them) rather than reimplementing CRUD by hand.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IProductRepository.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IProductRepository :
+    IEfRepository&lt;Product&gt;,
+    IEfCreatableRepository&lt;Product&gt;,
+    IEfUpdatableRepository&lt;Product&gt;,
+    IEfSoftDeletableRepository&lt;Product&gt;
+{
+    Task&lt;List&lt;Product&gt;&gt; GetAllProductsAsync(ProductPaginationDto pagination);
+    Task&lt;int&gt; GetNewBarcode();
+}</code></pre>
+</div>
+
+<blockquote>Trade-off versus a single <code>IRepository&lt;T&gt;</code>: more files and more generic constraints up front, in exchange for the compiler stopping you from calling <code>DeleteAsync</code> on something that was never meant to be deletable, and from forgetting to update a timestamp.</blockquote>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

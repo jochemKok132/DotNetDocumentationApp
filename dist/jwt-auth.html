@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JWT Authentication · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html" class="active" aria-current="page">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>JWT Authentication</h1>
+<p class="lede">Password hashing, token generation, login, and the supporting API config (rate limiting, Swagger bearer auth) as one self-contained flow.</p>
+
+<h2>Password hashing behind an interface</h2>
+<p>Wrapping BCrypt behind <code>IPassword</code> keeps the hashing library swappable and makes the auth service trivially mockable in tests.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Password.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IPassword
+{
+    bool Validate(string hash, string password);
+    string Hash(string password);
+}
+
+public class Password : IPassword
+{
+    public bool Validate(string hash, string password)
+        => BCrypt.Net.BCrypt.Verify(password, hash);
+
+    public string Hash(string password)
+        => BCrypt.Net.BCrypt.HashPassword(password);
+}</code></pre>
+</div>
+
+<h2>Token generation</h2>
+<p>Config values (key, issuer, expiry) are validated up front so a misconfigured environment fails loudly at first use instead of producing a broken, unverifiable token.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>TokenService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class TokenService : ITokenService
+{
+    private readonly IConfiguration _config;
+    public TokenService(IConfiguration config) => _config = config;
+
+    public Token GenerateToken(User user)
+    {
+        var claims = new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.FullName ?? ""),
+            new Claim(ClaimTypes.Role, user.Role.ToString())
+        });
+
+        string key = _config["JWT:Key"] ?? throw new ArgumentException("JWT key missing");
+        string issuer = _config["JWT:Issuer"] ?? throw new ArgumentException("JWT issuer missing");
+        double expiryMinutes = double.Parse(_config["JWT:ExpiryMinutes"]!);
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+        var expiresOn = DateTime.UtcNow.AddMinutes(expiryMinutes);
+
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Issuer = issuer,
+            Subject = claims,
+            Expires = expiresOn,
+            SigningCredentials = credentials
+        };
+
+        return new Token
+        {
+            JWT = new JsonWebTokenHandler().CreateToken(descriptor),
+            ExpiresOn = expiresOn
+        };
+    }
+}</code></pre>
+</div>
+
+<h2>Login flow</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>AuthService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class AuthService : IAuthService
+{
+    private readonly IUserRepository _users;
+    private readonly ITokenService _tokens;
+    private readonly IPassword _password;
+
+    public AuthService(IUserRepository users, ITokenService tokens, IPassword password)
+    {
+        _users = users; _tokens = tokens; _password = password;
+    }
+
+    public async Task&lt;Token&gt; LoginAsync(LoginRequest request)
+    {
+        var user = await _users.GetByEmailAsync(request.Email);
+
+        if (user is null || !_password.Validate(user.HashedPassword, request.Password))
+            throw new AuthenticationException("Email or password is incorrect.");
+
+        return _tokens.GenerateToken(user);
+    }
+}</code></pre>
+</div>
+
+<h2>API wiring: JWT bearer, rate limiter, Swagger security</h2>
+<p>All three registered together in one <code>RegisterAPI</code> extension (see <a href="index.html">Layered Architecture</a>). The rate limiter partitions by user ID when authenticated, falling back to IP for anonymous requests.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">private static IServiceCollection RegisterAuthentication(this IServiceCollection services, IConfiguration config)
+{
+    string issuer = config["JWT:Issuer"] ?? "";
+    string key = config["JWT:Key"] ?? "";
+
+    services.AddAuthentication(o =>
+    {
+        o.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        o.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = issuer,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+    services.AddAuthorization();
+    return services;
+}
+
+private static IServiceCollection RegisterRateLimiter(this IServiceCollection services)
+{
+    services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.GlobalLimiter = PartitionedRateLimiter.Create&lt;HttpContext, string&gt;(context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                    ?? context.Connection.RemoteIpAddress?.ToString()
+                    ?? "anonymous",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 50,
+                    AutoReplenishment = true,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
+    });
+    return services;
+}
+
+private static IServiceCollection RegisterSwagger(this IServiceCollection services)
+{
+    services.AddSwaggerGen(options =>
+    {
+        options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT"
+        });
+        options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+        {
+            [new OpenApiSecuritySchemeReference("Bearer", document)] = []
+        });
+    });
+    return services;
+}</code></pre>
+</div>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

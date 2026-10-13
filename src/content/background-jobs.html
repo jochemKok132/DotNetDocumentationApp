@@ -1,0 +1,68 @@
+<h1>Background Jobs</h1>
+<p class="lede">Recurring work that shouldn't block a request — cleaning up expired tokens, sending scheduled reminders, refreshing a cache — runs as a <code>BackgroundService</code> registered alongside everything else in DI, with its own scope per tick since it lives longer than any single request.</p>
+
+<h2>The base shape</h2>
+<p><code>BackgroundService</code> gives you a single <code>ExecuteAsync</code> loop that starts with the app and is cancelled cleanly on shutdown via the token it's handed.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>BackgroundJobs/ExpiredTokenCleanupJob.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ExpiredTokenCleanupJob : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger&lt;ExpiredTokenCleanupJob&gt; _logger;
+    private readonly TimeSpan _interval = TimeSpan.FromHours(1);
+
+    public ExpiredTokenCleanupJob(IServiceScopeFactory scopeFactory, ILogger&lt;ExpiredTokenCleanupJob&gt; logger)
+    {
+        _scopeFactory = scopeFactory;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                // BackgroundService is a singleton — DbContext and scoped
+                // repositories are not, so a fresh scope is created per tick.
+                using var scope = _scopeFactory.CreateScope();
+                var repository = scope.ServiceProvider.GetRequiredService&lt;ITokenRepository&gt;();
+
+                var removed = await repository.DeleteExpiredAsync(DateTime.UtcNow);
+                if (removed &gt; 0)
+                    _logger.LogInformation("Cleaned up {Count} expired tokens", removed);
+            }
+            catch (Exception ex)
+            {
+                // never let one failed tick kill the loop
+                _logger.LogError(ex, "Token cleanup job failed");
+            }
+
+            await Task.Delay(_interval, stoppingToken);
+        }
+    }
+}</code></pre>
+</div>
+
+<h2>Registration</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">services.AddHostedService&lt;ExpiredTokenCleanupJob&gt;();</code></pre>
+</div>
+
+<h2>Key rules for the loop</h2>
+<ul>
+  <li><strong>New scope per tick</strong> — <code>BackgroundService</code> is registered once for the app's lifetime, but <code>DbContext</code> and most repositories are scoped. Resolving them straight from the constructor would hand every tick the same, ever-growing <code>DbContext</code>.</li>
+  <li><strong>Catch inside the loop, not around it</strong> — an uncaught exception stops the whole loop permanently until the app restarts. Log and continue instead.</li>
+  <li><strong>Respect the cancellation token</strong> — pass <code>stoppingToken</code> into <code>Task.Delay</code> and any async calls so shutdown doesn't hang waiting for a job mid-sleep.</li>
+</ul>
+
+<h2>When you outgrow this</h2>
+<p>A single <code>Task.Delay</code> loop is enough for "run roughly every N minutes" jobs in a single-instance deployment. Reach for something heavier — <a href="https://www.quartz-scheduler.net/">Quartz.NET</a> for cron-style scheduling, or <a href="https://www.hangfire.io/">Hangfire</a> for persisted/retryable jobs with a dashboard — once you need exact scheduling, jobs that survive a restart mid-run, or multiple instances that shouldn't all run the same job at once.</p>

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strongly-Typed Configuration · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section" open>
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html" class="active" aria-current="page">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Strongly-Typed Configuration</h1>
+<p class="lede">Reading config with <code>Configuration["JWT:Key"]</code> scattered across the codebase means every typo is a silent <code>null</code> discovered at runtime. The Options pattern binds a config section to a real class once, validates it at startup, and injects it wherever it's needed.</p>
+
+<h2>Define the shape</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Options/JwtOptions.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class JwtOptions
+{
+    public const string SectionName = "JWT";
+
+    public required string Key { get; set; }
+    public required string Issuer { get; set; }
+    public double ExpiryMinutes { get; set; } = 60;
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>appsettings.json</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-json">{
+  "JWT": {
+    "Key": "replace-with-a-real-secret",
+    "Issuer": "YourApp",
+    "ExpiryMinutes": 60
+  }
+}</code></pre>
+</div>
+
+<h2>Bind and validate at startup</h2>
+<p><code>ValidateDataAnnotations()</code> plus <code>ValidateOnStart()</code> means a missing or malformed section fails the app immediately on boot — not the first time a request happens to hit the code path that reads it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Dependencies.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">services.AddOptions&lt;JwtOptions&gt;()
+    .Bind(configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();</code></pre>
+</div>
+
+<h2>Inject it — no config lookups at the call site</h2>
+<p><code>IOptions&lt;T&gt;</code> for values that never change during the app's lifetime; <code>IOptionsSnapshot&lt;T&gt;</code> (scoped) if you want it to re-read on each request in a reloadable-config scenario.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>TokenService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class TokenService : ITokenService
+{
+    private readonly JwtOptions _options;
+
+    public TokenService(IOptions&lt;JwtOptions&gt; options)
+    {
+        _options = options.Value;
+    }
+
+    public Token GenerateToken(User user)
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.Key));
+        var expiresOn = DateTime.UtcNow.AddMinutes(_options.ExpiryMinutes);
+        // ... _options.Issuer, no ["JWT:Issuer"] string lookup anywhere
+    }
+}</code></pre>
+</div>
+
+<blockquote>Compare to the manual <code>Configuration["JWT:Key"] ?? throw ...</code> checks in <a href="jwt-auth.html">JWT Authentication</a> — those work, but the validation happens lazily on first use. Binding to a class with <code>ValidateOnStart()</code> moves that same check to app startup, which is worth it once a project has more than one or two config values.</blockquote>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

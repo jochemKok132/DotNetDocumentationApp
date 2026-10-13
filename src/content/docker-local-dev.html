@@ -1,0 +1,84 @@
+<h1>Docker for Local Development</h1>
+<p class="lede">The <a href="docker-nginx.html">Dockerizing for nginx</a> page covers the production image. Day-to-day development wants a different shape: fast rebuilds, hot reload, and a database that resets easily — without needing SQL Server or Node installed on the host at all.</p>
+
+<h2>.dockerignore — keep the build context small</h2>
+<p>Without this, every <code>docker build</code> copies <code>bin/</code>, <code>obj/</code>, <code>node_modules/</code>, and <code>.git</code> into the build context first, which is slow and can leak local build artifacts into the image.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>.dockerignore</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-text">**/bin
+**/obj
+**/node_modules
+**/.vs
+.git
+.env
+*.md
+Dockerfile*
+docker-compose*</code></pre>
+</div>
+
+<h2>docker-compose.override.yml — a dev-only layer</h2>
+<p>Compose automatically merges <code>docker-compose.yml</code> with <code>docker-compose.override.yml</code> when present. Keep production-shaped config (image tags, restart policies) in the base file, and put dev conveniences — bind-mounted source for hot reload, exposed debug ports, relaxed passwords — in the override, which never ships.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>docker-compose.override.yml</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">services:
+  api:
+    build:
+      target: build # stop at the SDK stage instead of the slim runtime stage
+    volumes:
+      - ./YourApp.API:/src/YourApp.API
+      - ./YourApp.Application:/src/YourApp.Application
+      - ./YourApp.Domain:/src/YourApp.Domain
+      - ./YourApp.Infrastructure:/src/YourApp.Infrastructure
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    command: dotnet watch --project YourApp.API run --urls http://0.0.0.0:8080
+    ports:
+      - "8080:8080"
+
+  db:
+    ports:
+      - "1433:1433" # exposed on the host so a local GUI client can connect
+    environment:
+      - SA_PASSWORD=DevOnlyPassword1!</code></pre>
+</div>
+
+<p><code>dotnet watch</code> inside the container plus the bind-mounted source folders means saving a file on the host triggers a rebuild inside the container — no <code>docker build</code> round-trip per change.</p>
+
+<h2>Bringing it up</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>shell</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-bash"># override file is picked up automatically alongside docker-compose.yml
+docker compose up --build
+
+# reset the database to a clean state — drops the volume entirely
+docker compose down -v
+docker compose up --build</code></pre>
+</div>
+
+<h2>Attaching a debugger</h2>
+<p>VS Code's Dev Containers extension can attach directly to a running container's process, so breakpoints work the same as running locally — see <code>.devcontainer/devcontainer.json</code> if the project uses one. Without it, the simplest option is running the API on the host (against the containerized database only) during active debugging, and switching to the full compose stack for integration testing.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>appsettings.Development.json — pointing the host process at the containerized DB</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-json">{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost,1433;Database=YourApp;User=sa;Password=DevOnlyPassword1!;TrustServerCertificate=True"
+  }
+}</code></pre>
+</div>
+
+<blockquote>Keep the override file out of what actually ships: <code>docker-compose.override.yml</code> should be in <code>.gitignore</code> or clearly marked dev-only if committed, and never referenced from the deploy pipeline in <a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a> — production always builds from the base <code>docker-compose.yml</code> and the real Dockerfile target.</blockquote>

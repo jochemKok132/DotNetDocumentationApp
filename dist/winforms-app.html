@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Windows Forms App · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html" class="active" aria-current="page">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Windows Forms App</h1>
+<p class="lede">WinForms has no built-in DI container the way ASP.NET Core does, but <code>Microsoft.Extensions.Hosting</code> can host one anyway — meaning a desktop app can reuse the exact same <code>Application</code>/<code>Infrastructure</code> layers and <code>Shared</code> DTOs as the API and every other frontend (see <a href="index.html">Layered Architecture &amp; DI</a>), instead of reimplementing data access.</p>
+
+<h2>Bootstrapping DI in Program.cs</h2>
+<p>The generic host gives WinForms the same <code>ServiceCollection</code>/<code>IServiceProvider</code> machinery ASP.NET Core uses, just without a web server attached.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">// dotnet add package Microsoft.Extensions.Hosting
+
+internal static class Program
+{
+    [STAThread]
+    static void Main()
+    {
+        ApplicationConfiguration.Initialize();
+
+        var host = Host.CreateDefaultBuilder()
+            .ConfigureServices((context, services) =>
+            {
+                services.RegisterApplication();
+                services.RegisterInfrastructure(
+                    context.Configuration.GetConnectionString("DefaultConnection")!);
+
+                // every form the app can open is itself a resolvable service
+                services.AddTransient&lt;MainForm&gt;();
+                services.AddTransient&lt;ResourceEditForm&gt;();
+            })
+            .Build();
+
+        var mainForm = host.Services.GetRequiredService&lt;MainForm&gt;();
+        Application.Run(mainForm);
+    }
+}</code></pre>
+</div>
+
+<h2>Forms take their dependencies through the constructor</h2>
+<p>Because <code>MainForm</code> is resolved from the container rather than <code>new</code>'d up, constructor injection works exactly like it does in a controller or a Blazor component.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>MainForm.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public partial class MainForm : Form
+{
+    private readonly IResourceService _resourceService;
+    private readonly IServiceProvider _serviceProvider;
+
+    public MainForm(IResourceService resourceService, IServiceProvider serviceProvider)
+    {
+        InitializeComponent();
+        _resourceService = resourceService;
+        _serviceProvider = serviceProvider;
+    }
+
+    private async void MainForm_Load(object sender, EventArgs e)
+    {
+        var resources = await _resourceService.GetAllAsync();
+        resourceGrid.DataSource = resources.ToList();
+    }
+
+    private void EditButton_Click(object sender, EventArgs e)
+    {
+        // resolve a child form through the container too, so it gets its own dependencies
+        using var editForm = _serviceProvider.GetRequiredService&lt;ResourceEditForm&gt;();
+        if (editForm.ShowDialog(this) == DialogResult.OK)
+            MainForm_Load(this, EventArgs.Empty);
+    }
+}</code></pre>
+</div>
+
+<h2>Long-running work: never block the UI thread</h2>
+<p>WinForms has one UI thread. An <code>async</code> event handler (like <code>MainForm_Load</code> above) keeps the form responsive during I/O, but touching a control from a background thread throws — marshal back via <code>Invoke</code>/<code>BeginInvoke</code>, or stick to <code>async</code>/<code>await</code> which already returns to the UI thread's <code>SynchronizationContext</code> automatically.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>reporting progress from a background operation</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">private async void ImportButton_Click(object sender, EventArgs e)
+{
+    var progress = new Progress&lt;int&gt;(percent => progressBar.Value = percent);
+
+    importButton.Enabled = false;
+    try
+    {
+        await _importService.ImportAsync(filePath, progress); // reports via IProgress<T>
+    }
+    finally
+    {
+        importButton.Enabled = true;
+    }
+}</code></pre>
+</div>
+
+<h2>Config the same way as the API</h2>
+<p>Same <a href="options-pattern.html">Strongly-Typed Configuration</a> approach — an <code>appsettings.json</code> next to the executable, bound to an options class, instead of scattering connection strings across <code>app.config</code> or hardcoding them.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>appsettings.json (Copy to Output Directory)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-json">{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=YourApp;Trusted_Connection=True;TrustServerCertificate=True"
+  }
+}</code></pre>
+</div>
+
+<blockquote>This is the same trick as <a href="cli-tool.html">Building a CLI Tool</a> — a non-web front end hosting the generic DI container so it can reuse the backend's Application/Infrastructure layers verbatim. Between the API, Blazor, Angular, a CLI tool, and WinForms, the actual business logic exists in exactly one place.</blockquote>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

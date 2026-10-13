@@ -1,0 +1,190 @@
+<h1>JWT Auth (Interceptor &amp; Guard)</h1>
+<p class="lede">The Angular equivalent of <a href="blazor-auth-state.html">JWT Auth State (Blazor)</a>: an <code>AuthService</code> holding the current user as observable state, a functional <code>HttpInterceptorFn</code> that attaches the token to every request (the Angular counterpart to Blazor's <code>AuthTokenHandler</code>), and a functional <code>CanActivateFn</code> guard (the counterpart to <code>[Authorize]</code>).</p>
+
+<h2>AuthService — token storage + reactive current-user state</h2>
+<p>A <code>BehaviorSubject</code> holds the decoded user so any component can subscribe and re-render reactively when login/logout happens, instead of polling storage.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>auth.service.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { BehaviorSubject, Observable, tap } from 'rxjs';
+import { jwtDecode } from 'jwt-decode';
+
+interface JwtClaims {
+  sub: string;
+  name: string;
+  role: string;
+  exp: number;
+}
+
+interface LoginResponse {
+  succeeded: boolean;
+  message?: string;
+  value?: { jwt: string; expiresOn: string };
+}
+
+const TOKEN_KEY = 'auth_token';
+
+@Injectable({ providedIn: 'root' })
+export class AuthService {
+  private currentUserSubject = new BehaviorSubject&lt;JwtClaims | null&gt;(this.readStoredUser());
+  currentUser$: Observable&lt;JwtClaims | null&gt; = this.currentUserSubject.asObservable();
+
+  constructor(private http: HttpClient) {}
+
+  login(email: string, password: string): Observable&lt;LoginResponse&gt; {
+    return this.http.post&lt;LoginResponse&gt;('/auth/login', { email, password }).pipe(
+      tap((response) =&gt; {
+        if (response.succeeded &amp;&amp; response.value) {
+          localStorage.setItem(TOKEN_KEY, response.value.jwt);
+          this.currentUserSubject.next(jwtDecode&lt;JwtClaims&gt;(response.value.jwt));
+        }
+      })
+    );
+  }
+
+  logout(): void {
+    localStorage.removeItem(TOKEN_KEY);
+    this.currentUserSubject.next(null);
+  }
+
+  getToken(): string | null {
+    return localStorage.getItem(TOKEN_KEY);
+  }
+
+  get currentUser(): JwtClaims | null {
+    return this.currentUserSubject.value;
+  }
+
+  isAuthenticated(): boolean {
+    const user = this.currentUserSubject.value;
+    if (!user) return false;
+    return user.exp * 1000 &gt; Date.now();
+  }
+
+  private readStoredUser(): JwtClaims | null {
+    const token = this.getToken();
+    if (!token) return null;
+
+    try {
+      const claims = jwtDecode&lt;JwtClaims&gt;(token);
+      return claims.exp * 1000 &gt; Date.now() ? claims : null;
+    } catch {
+      return null;
+    }
+  }
+}</code></pre>
+</div>
+
+<h2>Functional interceptor — attaches the token to every request</h2>
+<p>Modern Angular (16+) interceptors are plain functions, not classes — same role as Blazor's <code>AuthTokenHandler : DelegatingHandler</code>: every outgoing request passes through it, and it adds the header without any call site having to remember to.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>auth.interceptor.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">import { HttpInterceptorFn } from '@angular/common/http';
+import { inject } from '@angular/core';
+import { catchError, throwError } from 'rxjs';
+import { AuthService } from './auth.service';
+import { Router } from '@angular/router';
+
+export const authInterceptor: HttpInterceptorFn = (req, next) =&gt; {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  const token = auth.getToken();
+  const authReq = token
+    ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } })
+    : req;
+
+  return next(authReq).pipe(
+    catchError((error) =&gt; {
+      if (error.status === 401) {
+        auth.logout();
+        router.navigate(['/login']);
+      }
+      return throwError(() =&gt; error);
+    })
+  );
+};</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>app.config.ts — registration</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { authInterceptor } from './auth.interceptor';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(withInterceptors([authInterceptor])),
+    // ...
+  ],
+};</code></pre>
+</div>
+
+<h2>Functional route guard — the Angular <code>[Authorize]</code></h2>
+<p>A <code>CanActivateFn</code> gates a route the same way <code>[Authorize]</code> gates a controller action. A second guard variant checks a role claim, mirroring <code>[Authorize(Roles = "Admin")]</code>.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>auth.guard.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">import { CanActivateFn, Router } from '@angular/router';
+import { inject } from '@angular/core';
+import { AuthService } from './auth.service';
+
+export const authGuard: CanActivateFn = () =&gt; {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  if (auth.isAuthenticated()) return true;
+
+  router.navigate(['/login']);
+  return false;
+};
+
+export const roleGuard = (allowedRoles: string[]): CanActivateFn => () =&gt; {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  if (auth.isAuthenticated() &amp;&amp; allowedRoles.includes(auth.currentUser?.role ?? '')) {
+    return true;
+  }
+
+  router.navigate(['/unauthorized']);
+  return false;
+};</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>app.routes.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">export const routes: Routes = [
+  { path: 'login', component: LoginComponent },
+  {
+    path: 'dashboard',
+    component: DashboardComponent,
+    canActivate: [authGuard],
+  },
+  {
+    path: 'admin',
+    component: AdminPanelComponent,
+    canActivate: [authGuard, roleGuard(['Admin'])],
+  },
+];</code></pre>
+</div>
+
+<blockquote>Side-by-side with Blazor: <code>AuthStateProvider</code> ↔ <code>AuthService</code> (both decode the JWT client-side and expose reactive current-user state), <code>AuthTokenHandler</code> ↔ <code>authInterceptor</code> (both attach the header to every outgoing request), <code>[Authorize]</code> ↔ <code>canActivate: [authGuard]</code>. Same three-part shape, different framework's idioms for wiring it in.</blockquote>

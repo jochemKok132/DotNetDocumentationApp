@@ -1,0 +1,114 @@
+<h1>Generic Pagination Pattern</h1>
+<p class="lede">One base class for page number/size/sort direction, generic over a strongly-typed "order by" enum per resource, plus a filter DTO per resource that adds only the fields that resource can be searched by.</p>
+
+<h2>Base + generic sort type</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Pagination.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public abstract class PaginationBase
+{
+    public int PageSize { get; set; } = 10;
+    public int PageNumber { get; set; } = 1;
+    public OrderType OrderType { get; set; }
+}
+
+public class Pagination&lt;TOrderBy&gt; : PaginationBase where TOrderBy : Enum
+{
+    public TOrderBy OrderBy { get; set; } = default!;
+}
+
+public enum OrderType
+{
+    Descending,
+    Ascending
+}</code></pre>
+</div>
+
+<h2>One order-by enum per resource</h2>
+<p>Each resource declares exactly the columns it's sensible to sort by — this becomes the allow-list; there's no way to accidentally expose "order by internal ID" or an unindexed column through the API, because the enum simply doesn't have that member.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>PaginationEnums.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public enum ProductOrderBy
+{
+    CreatedAt,
+    UpdatedAt,
+    ProductName,
+    Stock,
+    Shelf,
+    Brand,
+    Sales
+}
+
+public enum EmployeeOrderBy
+{
+    CreatedAt,
+    UpdatedAt,
+    EmployeeName,
+    EmployeeId,
+    Role
+}</code></pre>
+</div>
+
+<h2>Per-resource request DTO adds the filters</h2>
+<p>Inherits <code>Pagination&lt;TOrderBy&gt;</code> for the paging/sorting shell, then tacks on only the search fields that make sense for that resource.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>PaginationDtos.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ProductPaginationDto : Pagination&lt;ProductOrderBy&gt;
+{
+    public string? ProductName { get; set; }
+    public int Barcode { get; set; }
+    public string? Location { get; set; }
+}
+
+public class EmployeePaginationDto : Pagination&lt;EmployeeOrderBy&gt;
+{
+    public string? EmployeeName { get; set; }
+    public string? EmployeeId { get; set; }
+    public EmployeeRoleDto? Role { get; set; }
+}</code></pre>
+</div>
+
+<h2>Consuming it in a repository</h2>
+<p>The controller/service just passes the whole DTO down; the repository turns it into a query. A <code>switch</code> on the sort enum keeps the "which column" decision in one place per resource.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ProductRepository.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task&lt;List&lt;Product&gt;&gt; GetAllProductsAsync(ProductPaginationDto pagination)
+{
+    var query = _dbSet.AsQueryable();
+
+    if (!string.IsNullOrWhiteSpace(pagination.ProductName))
+        query = query.Where(p => p.Name.Contains(pagination.ProductName));
+
+    query = pagination.OrderBy switch
+    {
+        ProductOrderBy.ProductName => Sort(query, p => p.Name, pagination.OrderType),
+        ProductOrderBy.Stock => Sort(query, p => p.StockAmount, pagination.OrderType),
+        ProductOrderBy.UpdatedAt => Sort(query, p => p.UpdatedAt, pagination.OrderType),
+        _ => Sort(query, p => p.CreatedAt, pagination.OrderType),
+    };
+
+    return await query
+        .Skip((pagination.PageNumber - 1) * pagination.PageSize)
+        .Take(pagination.PageSize)
+        .ToListAsync();
+}
+
+private static IQueryable&lt;T&gt; Sort&lt;T, TKey&gt;(IQueryable&lt;T&gt; query, Expression&lt;Func&lt;T, TKey&gt;&gt; key, OrderType order)
+    => order == OrderType.Ascending ? query.OrderBy(key) : query.OrderByDescending(key);</code></pre>
+</div>
+
+<blockquote>Same idea as <a href="composable-repositories.html">Composable Repository Interfaces</a>: push the "what's allowed" decision into the type system (an enum, a generic constraint) instead of trusting every caller to pass a sane raw string column name.</blockquote>

@@ -1,0 +1,137 @@
+<h1>HTTP Service Wrapper (Blazor)</h1>
+<p class="lede">A single generic service every page/component calls through, instead of injecting <code>HttpClient</code> everywhere. It normalizes errors into the same <code>ApiResponse&lt;T&gt;</code> shape the API returns.</p>
+
+<h2>Interface</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IHttpService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IHttpService
+{
+    Task&lt;ApiResponse&lt;TResponse&gt;&gt; GetAsync&lt;TResponse&gt;(string url);
+    Task&lt;ApiResponse&lt;TResponse&gt;&gt; PostAsync&lt;TResponse, TRequest&gt;(string url, TRequest request);
+    Task&lt;ApiResponse&lt;TResponse&gt;&gt; PutAsync&lt;TResponse, TRequest&gt;(string url, TRequest request);
+    Task&lt;ApiResponse&lt;TResponse&gt;&gt; DeleteAsync&lt;TResponse&gt;(string url);
+    Task&lt;ApiResponse&lt;TResponse&gt;&gt; PostIncludeFileAsync&lt;TResponse, TRequest&gt;(
+        string url, TRequest request, Expression&lt;Func&lt;TRequest, IBrowserFile?&gt;&gt; fileProperty);
+}</code></pre>
+</div>
+
+<h2>Implementation — every call funnels through the same try/catch</h2>
+<p>Network failures, deserialization failures, whatever — they all collapse into one generic <code>ApiResponse.Fail(...)</code>, so calling code never has to handle transport errors separately from API-level errors.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>HttpService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class HttpService : IHttpService
+{
+    private readonly HttpClient _http;
+    public HttpService(HttpClient http) => _http = http;
+
+    public async Task&lt;ApiResponse&lt;TResponse&gt;&gt; GetAsync&lt;TResponse&gt;(string url)
+    {
+        try
+        {
+            using var response = await _http.GetAsync(url);
+            return await response.Content.ReadFromJsonAsync&lt;ApiResponse&lt;TResponse&gt;&gt;()
+                ?? throw new ArgumentException();
+        }
+        catch { return Error&lt;TResponse&gt;(); }
+    }
+
+    public async Task&lt;ApiResponse&lt;TResponse&gt;&gt; PostAsync&lt;TResponse, TRequest&gt;(string url, TRequest request)
+    {
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(url, request);
+            return await response.Content.ReadFromJsonAsync&lt;ApiResponse&lt;TResponse&gt;&gt;()
+                ?? throw new ArgumentException();
+        }
+        catch { return Error&lt;TResponse&gt;(); }
+    }
+
+    // PutAsync / DeleteAsync follow the same shape.
+
+    private static ApiResponse&lt;TResponse&gt; Error&lt;TResponse&gt;()
+        => ApiResponse&lt;TResponse&gt;.Fail("An unexpected error occurred.");
+}</code></pre>
+</div>
+
+<h2>File upload via reflection</h2>
+<p>When a request DTO carries an <code>IBrowserFile</code> alongside plain fields, this builds a <code>multipart/form-data</code> body automatically: it pulls the file out via the expression you pass in, then walks every other property with reflection to add it as a form field. This means a new upload endpoint never needs its own hand-written multipart code — just a DTO shape and a call site.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>HttpService.cs — PostIncludeFileAsync</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task&lt;ApiResponse&lt;TResponse&gt;&gt; PostIncludeFileAsync&lt;TResponse, TRequest&gt;(
+    string url, TRequest request, Expression&lt;Func&lt;TRequest, IBrowserFile?&gt;&gt; fileProperty)
+{
+    try
+    {
+        using var content = new MultipartFormDataContent();
+        var file = fileProperty.Compile()(request);
+
+        if (fileProperty.Body is not MemberExpression expr ||
+            expr.Member is not PropertyInfo fileInfo)
+            return Error&lt;TResponse&gt;();
+
+        if (file is not null)
+        {
+            var streamContent = new StreamContent(file.OpenReadStream());
+            if (file.ContentType.Trim().Length == 0)
+                return ApiResponse&lt;TResponse&gt;.Fail("Invalid file type.");
+
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue(file.ContentType);
+            content.Add(streamContent, fileInfo.Name, file.Name);
+        }
+
+        foreach (var prop in typeof(TRequest).GetProperties())
+        {
+            if (prop.Name == fileInfo.Name) continue;
+
+            var value = prop.GetValue(request);
+            string actual = value switch
+            {
+                null => string.Empty,
+                DateTime dt => dt.ToString("o"),
+                string s => s,
+                _ when prop.PropertyType.IsPrimitive || prop.PropertyType.IsEnum || value is decimal
+                    => value.ToString() ?? string.Empty,
+                _ => JsonSerializer.Serialize(value)
+            };
+            content.Add(new StringContent(actual), prop.Name);
+        }
+
+        using var response = await _http.PostAsync(url, content);
+        return await response.Content.ReadFromJsonAsync&lt;ApiResponse&lt;TResponse&gt;&gt;()
+            ?? throw new ArgumentException();
+    }
+    catch { return Error&lt;TResponse&gt;(); }
+}</code></pre>
+</div>
+
+<h2>A feature service on top</h2>
+<p>Feature-specific services (one per API controller) are thin: each method is a one-line call into <code>IHttpService</code> with the right URL and generic types.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ResourceService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ResourceService : IResourceService
+{
+    private readonly IHttpService _http;
+    public ResourceService(IHttpService http) => _http = http;
+
+    public Task&lt;ApiResponse&lt;List&lt;ResourceDto&gt;&gt;&gt; GetAllAsync()
+        => _http.GetAsync&lt;List&lt;ResourceDto&gt;&gt;("/Resource");
+
+    public Task&lt;ApiResponse&lt;object&gt;&gt; CreateAsync(CreateResourceRequest request)
+        => _http.PostAsync&lt;object, CreateResourceRequest&gt;("/Resource", request);
+}</code></pre>
+</div>

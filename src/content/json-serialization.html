@@ -1,0 +1,106 @@
+<h1>JSON Serialization Patterns</h1>
+<p class="lede">Configuring <code>System.Text.Json</code> once, in one place, instead of passing ad-hoc <code>JsonSerializerOptions</code> around every call site — plus the converter, source-generation, and polymorphism patterns worth knowing about.</p>
+
+<h2>One shared options instance</h2>
+<p>Define the options once as a static readonly field and reuse it everywhere — every <code>JsonSerializerOptions</code> instance caches reflection metadata internally, so creating a fresh one per call is wasteful and, worse, easy to configure inconsistently across the codebase.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>JsonDefaults.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class JsonDefaults
+{
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter(), new UtcDateTimeJsonConverter() },
+        PropertyNameCaseInsensitive = true
+    };
+}
+
+// usage anywhere outside ASP.NET's own pipeline (which has its own AddJsonOptions hook — see below)
+var json = JsonSerializer.Serialize(resource, JsonDefaults.Options);
+var parsed = JsonSerializer.Deserialize&lt;ResourceDto&gt;(json, JsonDefaults.Options);</code></pre>
+</div>
+
+<p>In ASP.NET Core itself, the equivalent is configuring it once via <code>AddJsonOptions</code> — see the <a href="api-response.html">custom UTC converter</a> registered the same way, alongside <code>JsonStringEnumConverter</code> so enums serialize as readable strings (<code>"Admin"</code>) instead of raw numbers.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter());
+});</code></pre>
+</div>
+
+<h2>Polymorphic serialization</h2>
+<p>When a property's runtime type varies (a base <code>Notification</code> with <code>EmailNotification</code>/<code>SmsNotification</code> subtypes, say), <code>JsonDerivedType</code> attributes tell the serializer to write and read a discriminator field automatically instead of losing the subtype's extra fields.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Notification.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(EmailNotification), "email")]
+[JsonDerivedType(typeof(SmsNotification), "sms")]
+public abstract class Notification
+{
+    public string Message { get; set; } = "";
+}
+
+public class EmailNotification : Notification
+{
+    public string Subject { get; set; } = "";
+}
+
+public class SmsNotification : Notification
+{
+    public string PhoneNumber { get; set; } = "";
+}
+
+// serializes EmailNotification as: { "type": "email", "message": "...", "subject": "..." }
+// deserializing that JSON back to Notification correctly produces an EmailNotification instance</code></pre>
+</div>
+
+<h2>Source-generated serialization</h2>
+<p>Reflection-based serialization is the default and is fine for most apps. Source generation trades a bit of setup for faster startup and serialization with zero reflection — worth it for a console tool (see <a href="cli-tool.html">Building a CLI Tool</a>) that needs to start instantly, or anything trimmed/published as Native AOT, where reflection-based serialization doesn't work at all.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>AppJsonContext.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[JsonSerializable(typeof(ResourceDto))]
+[JsonSerializable(typeof(List&lt;ResourceDto&gt;))]
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+public partial class AppJsonContext : JsonSerializerContext { }
+
+// usage — note the context passed instead of JsonSerializerOptions
+var json = JsonSerializer.Serialize(resource, AppJsonContext.Default.ResourceDto);
+var parsed = JsonSerializer.Deserialize(json, AppJsonContext.Default.ResourceDto);</code></pre>
+</div>
+
+<h2>Circular references</h2>
+<p>An EF Core navigation property that points back to its parent (<code>MatchParticipant.Match.Participants</code> containing the same participant) throws by default. <code>ReferenceHandler.IgnoreCycles</code> breaks the cycle by omitting the back-reference — usually the right call for API responses, where you want a DTO shape anyway rather than the raw entity graph (see <a href="mapping-validation.html">Mapping Extensions</a> for the DTO-mapping alternative, which sidesteps this entirely).</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>quick fix vs. the real fix</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">// quick fix: silences the exception, but still risks leaking entity internals
+options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+
+// the real fix: never serialize EF entities directly — map to a DTO first
+return Ok(ApiResponse&lt;MatchParticipantDto&gt;.Ok(participant.ToDto()));</code></pre>
+</div>
+
+<blockquote>Rule of thumb: reach for source generation and <code>ReferenceHandler</code> tweaks only when you've hit the specific problem they solve (AOT, or an unavoidable navigation cycle). For everyday API work, a shared <code>JsonSerializerOptions</code> plus mapping entities to DTOs before they're ever handed to the serializer avoids most JSON surprises entirely.</blockquote>

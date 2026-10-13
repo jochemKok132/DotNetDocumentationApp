@@ -1,0 +1,150 @@
+<h1>Composable Repository Interfaces</h1>
+<p class="lede">An alternative to a single <code>IRepository&lt;T&gt;</code> (see <a href="repository-pattern.html">Repository Pattern</a>): split repository capabilities into small interfaces, each gated by a matching marker interface on the entity. An entity only gets the operations its marker interfaces say it supports — there's no <code>DeleteAsync</code> sitting unused on an entity that's never deletable.</p>
+
+<h2>Entity capability markers</h2>
+<p>Plain marker interfaces in the Domain layer. An entity implements whichever combination it needs.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IEntities/*.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IEntity
+{
+    Guid Id { get; set; }
+}
+
+public interface ICreateable
+{
+    DateTime CreatedAt { get; set; }
+}
+
+public interface IUpdatable
+{
+    DateTime UpdatedAt { get; set; }
+}
+
+public interface ISoftDeletable
+{
+    bool SoftDeleted { get; set; }
+    DateTime SoftDeletedAt { get; set; }
+}</code></pre>
+</div>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Product.cs — picks the capabilities it needs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class Product : IEntity, ICreateable, IUpdatable, ISoftDeletable
+{
+    public Guid Id { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public bool SoftDeleted { get; set; }
+    public DateTime SoftDeletedAt { get; set; }
+
+    public string Name { get; set; } = "";
+    // ...
+}</code></pre>
+</div>
+
+<h2>One repository interface per capability</h2>
+<p>Each generic constraint (<code>where T : ICreateable</code>, etc.) means the interface — and its EF implementation — only compiles against entities that actually support it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IEfRepository.cs + friends</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IEfRepository&lt;T&gt; where T : class, IEntity
+{
+    Task&lt;List&lt;T&gt;&gt; GetAllAsync();
+    Task&lt;T?&gt; GetByIdAsync(Guid id);
+    Task SaveChangesAsync();
+}
+
+public interface IEfCreatableRepository&lt;T&gt; where T : class, ICreateable
+{
+    Task AddAsync(T entity);
+}
+
+public interface IEfUpdatableRepository&lt;T&gt; where T : class, IUpdatable
+{
+    Task UpdateAsync(T entity);
+}
+
+public interface IEfSoftDeletableRepository&lt;T&gt; where T : class, ISoftDeletable
+{
+    Task SoftDeleteAsync(T entity);
+}</code></pre>
+</div>
+
+<h2>Implementations stamp the timestamp themselves</h2>
+<p>Because each implementation is scoped to one concern, it's the natural place to stamp <code>CreatedAt</code>/<code>UpdatedAt</code>/<code>SoftDeletedAt</code> — callers never set these manually, so they can't forget to.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>EfCreatableRepository.cs / EfSoftDeletableRepository.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class EfCreatableRepository&lt;T&gt; : IEfCreatableRepository&lt;T&gt; where T : class, ICreateable
+{
+    private readonly DbSet&lt;T&gt; _dbSet;
+    private readonly AppDbContext _context;
+
+    public EfCreatableRepository(AppDbContext context)
+    {
+        _context = context;
+        _dbSet = context.Set&lt;T&gt;();
+    }
+
+    public async Task AddAsync(T entity)
+    {
+        entity.CreatedAt = DateTime.UtcNow;
+        _dbSet.Add(entity);
+        await _context.SaveChangesAsync();
+    }
+}
+
+public class EfSoftDeletableRepository&lt;T&gt; : IEfSoftDeletableRepository&lt;T&gt; where T : class, ISoftDeletable
+{
+    private readonly DbSet&lt;T&gt; _dbSet;
+    private readonly AppDbContext _context;
+
+    public EfSoftDeletableRepository(AppDbContext context)
+    {
+        _context = context;
+        _dbSet = context.Set&lt;T&gt;();
+    }
+
+    public async Task SoftDeleteAsync(T entity)
+    {
+        entity.SoftDeletedAt = DateTime.UtcNow;
+        entity.SoftDeleted = true;
+        _dbSet.Update(entity);
+        await _context.SaveChangesAsync();
+    }
+}</code></pre>
+</div>
+
+<h2>A concrete repository composes what it needs</h2>
+<p>A feature-specific repository interface inherits exactly the capability interfaces its entity supports, then the implementation composes the generic pieces (often by inheriting more than one, or by injecting them) rather than reimplementing CRUD by hand.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>IProductRepository.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public interface IProductRepository :
+    IEfRepository&lt;Product&gt;,
+    IEfCreatableRepository&lt;Product&gt;,
+    IEfUpdatableRepository&lt;Product&gt;,
+    IEfSoftDeletableRepository&lt;Product&gt;
+{
+    Task&lt;List&lt;Product&gt;&gt; GetAllProductsAsync(ProductPaginationDto pagination);
+    Task&lt;int&gt; GetNewBarcode();
+}</code></pre>
+</div>
+
+<blockquote>Trade-off versus a single <code>IRepository&lt;T&gt;</code>: more files and more generic constraints up front, in exchange for the compiler stopping you from calling <code>DeleteAsync</code> on something that was never meant to be deletable, and from forgetting to update a timestamp.</blockquote>

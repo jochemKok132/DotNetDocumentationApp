@@ -1,0 +1,125 @@
+<h1>Webhooks</h1>
+<p class="lede">Two directions: <strong>receiving</strong> a webhook from a third party (verify it's genuinely from them before trusting the body) and <strong>sending</strong> one to a customer's endpoint (sign it yourself, and retry when their server is down).</p>
+
+<h2>Receiving: verify the signature before touching the body</h2>
+<p>Anyone can POST to a public webhook URL. Providers (Stripe, GitHub, etc.) sign the raw request body with a shared secret and send the signature in a header — recompute it yourself and compare before you deserialize or act on anything.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>WebhookController.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[ApiController]
+[Route("webhooks")]
+public class WebhookController : ControllerBase
+{
+    private readonly IConfiguration _config;
+    private readonly IWebhookProcessor _processor;
+
+    public WebhookController(IConfiguration config, IWebhookProcessor processor)
+    {
+        _config = config;
+        _processor = processor;
+    }
+
+    [HttpPost("provider")]
+    public async Task&lt;IActionResult&gt; ReceiveAsync()
+    {
+        Request.EnableBuffering();
+        using var reader = new StreamReader(Request.Body, leaveOpen: true);
+        var rawBody = await reader.ReadToEndAsync();
+        Request.Body.Position = 0;
+
+        var signature = Request.Headers["X-Webhook-Signature"].ToString();
+        var secret = _config["Webhooks:ProviderSecret"]!;
+
+        if (!IsValidSignature(rawBody, signature, secret))
+            return Unauthorized();
+
+        var payload = JsonSerializer.Deserialize&lt;WebhookPayload&gt;(rawBody)
+            ?? throw new ArgumentException("Invalid payload.");
+
+        await _processor.HandleAsync(payload);
+
+        return Ok(); // 200 as fast as possible — see "acknowledge fast" below
+    }
+
+    private static bool IsValidSignature(string body, string signatureHeader, string secret)
+    {
+        var expected = Convert.ToHexString(
+            HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(body)));
+
+        // constant-time comparison — string == would leak timing information
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(expected.ToLowerInvariant()),
+            Encoding.UTF8.GetBytes(signatureHeader.ToLowerInvariant()));
+    }
+}</code></pre>
+</div>
+
+<h2>Acknowledge fast, process slow</h2>
+<p>Most providers retry a webhook if they don't get a 2xx response within a few seconds — and will keep retrying, creating duplicates, if your handler is slow. Acknowledge immediately and hand the real work to a background queue (see <a href="background-jobs.html">Background Jobs</a>) instead of doing it inline in the request.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>enqueue instead of processing inline</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[HttpPost("provider")]
+public async Task&lt;IActionResult&gt; ReceiveAsync([FromBody] WebhookPayload payload)
+{
+    if (!IsValidSignature(/* ... */)) return Unauthorized();
+
+    // idempotency: providers redeliver, so upsert on the provider's event ID
+    var alreadyProcessed = await _eventLog.ExistsAsync(payload.EventId);
+    if (alreadyProcessed) return Ok();
+
+    await _eventLog.RecordAsync(payload.EventId);
+    _queue.Enqueue(payload); // picked up by a BackgroundService
+
+    return Ok();
+}</code></pre>
+</div>
+
+<h2>Sending: sign your own outgoing webhooks</h2>
+<p>If your app calls out to a customer's endpoint, give them the same guarantee providers give you — a signature they can verify — plus retries with backoff, since their endpoint being briefly down shouldn't lose the event.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>WebhookSender.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class WebhookSender
+{
+    private readonly HttpClient _http;
+    public WebhookSender(HttpClient http) => _http = http;
+
+    public async Task SendAsync(string url, string secret, object payload)
+    {
+        var body = JsonSerializer.Serialize(payload);
+        var signature = Convert.ToHexString(
+            HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(body)));
+
+        var delays = new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30) };
+
+        for (int attempt = 0; attempt &lt;= delays.Length; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("X-Webhook-Signature", signature.ToLowerInvariant());
+
+            var response = await _http.SendAsync(request);
+            if (response.IsSuccessStatusCode) return;
+
+            if (attempt &lt; delays.Length)
+                await Task.Delay(delays[attempt]);
+        }
+
+        // all retries exhausted — log it, don't throw and crash the caller's flow
+    }
+}</code></pre>
+</div>
+
+<blockquote>For anything beyond a handful of webhook subscribers, reach for <a href="background-jobs.html">Background Jobs</a> (or a real queue like Azure Service Bus/RabbitMQ) to drive the retry loop instead of blocking the original request thread on <code>Task.Delay</code> — the pattern above is the right shape, but shouldn't run inline in whatever triggered the event.</blockquote>

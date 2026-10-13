@@ -1,0 +1,89 @@
+<h1>Global Exception Middleware</h1>
+<p class="lede">The <code>ErrorController</code> + <code>UseExceptionHandler("/Error")</code> combo from <a href="api-response.html">ApiResponse &amp; Controllers</a> works, but every exception ends up generic 500s with no distinction. ASP.NET Core's <code>IExceptionHandler</code> interface lets you map specific exception types to specific status codes in one place, so controllers can stop wrapping every action in try/catch.</p>
+
+<h2>One handler, one switch</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Middleware/GlobalExceptionHandler.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class GlobalExceptionHandler : IExceptionHandler
+{
+    private readonly ILogger&lt;GlobalExceptionHandler&gt; _logger;
+
+    public GlobalExceptionHandler(ILogger&lt;GlobalExceptionHandler&gt; logger) => _logger = logger;
+
+    public async ValueTask&lt;bool&gt; TryHandleAsync(
+        HttpContext context, Exception exception, CancellationToken cancellationToken)
+    {
+        var (statusCode, message) = exception switch
+        {
+            KeyNotFoundException => (StatusCodes.Status404NotFound, exception.Message),
+            AuthenticationException => (StatusCodes.Status401Unauthorized, exception.Message),
+            ArgumentException => (StatusCodes.Status400BadRequest, exception.Message),
+            _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
+        };
+
+        if (statusCode == StatusCodes.Status500InternalServerError)
+            _logger.LogError(exception, "Unhandled exception");
+
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+
+        await context.Response.WriteAsJsonAsync(
+            ApiResponse&lt;object&gt;.Fail(message), cancellationToken);
+
+        return true; // we handled it — don't let it bubble further
+    }
+}</code></pre>
+</div>
+
+<h2>Registration</h2>
+<p><code>AddProblemDetails()</code> is required alongside the handler even though this example doesn't use RFC 7807 problem details directly — it's what wires the exception-handling middleware pipeline up in .NET 8+.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">builder.Services.AddExceptionHandler&lt;GlobalExceptionHandler&gt;();
+builder.Services.AddProblemDetails();
+
+// ...
+
+app.UseExceptionHandler(); // no "/Error" path needed — handled in-process</code></pre>
+</div>
+
+<h2>Controllers shrink</h2>
+<p>With exception types mapped centrally, a controller action becomes a straight line — throw a meaningful exception and let the middleware translate it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ResourceController.cs — before vs after</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">// Before: try/catch in every action (see ApiResponse & Controllers)
+[HttpGet("{id:guid}")]
+public async Task&lt;IActionResult&gt; GetAsync(Guid id)
+{
+    try
+    {
+        var result = await _service.GetDetailAsync(id);
+        return Ok(ApiResponse&lt;ResourceDto&gt;.Ok(result));
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return NotFound(ApiResponse&lt;ResourceDto&gt;.Fail(ex.Message));
+    }
+}
+
+// After: the service throws, the middleware maps it
+[HttpGet("{id:guid}")]
+public async Task&lt;IActionResult&gt; GetAsync(Guid id)
+{
+    var result = await _service.GetDetailAsync(id); // throws KeyNotFoundException on miss
+    return Ok(ApiResponse&lt;ResourceDto&gt;.Ok(result));
+}</code></pre>
+</div>
+
+<blockquote>Trade-off: centralizing exception → status-code mapping is less flexible per-endpoint (you can't easily return a different status for the same exception type in two different controllers). For most CRUD APIs that consistency is exactly what you want; reach for the per-controller try/catch style instead when a handful of endpoints genuinely need bespoke error handling.</blockquote>

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApiResponse &amp; Controllers · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html" class="active" aria-current="page">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>ApiResponse &amp; Controllers</h1>
+<p class="lede">Every endpoint returns the same envelope shape, so the frontend never has to guess whether a payload is data or an error message.</p>
+
+<h2>The envelope</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ApiResponse.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ApiResponse&lt;T&gt;
+{
+    public T? Value { get; set; }
+    public bool Succeeded { get; set; }
+    public string? Message { get; set; }
+
+    public static ApiResponse&lt;T&gt; Ok(T? value = default, string? message = null)
+        => new() { Succeeded = true, Message = message, Value = value };
+
+    public static ApiResponse&lt;T&gt; Fail(string? message = null)
+        => new() { Succeeded = false, Message = message };
+}</code></pre>
+</div>
+
+<h2>Controller convention</h2>
+<p>Controllers stay thin: call the service, wrap the result, translate expected exceptions into the right status code. <code>[Authorize(Roles = "Admin")]</code> gates admin-only actions per-endpoint rather than per-controller when a controller mixes access levels.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ResourceController.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[ApiController]
+[Route("[controller]")]
+[Authorize]
+public class ResourceController : ControllerBase
+{
+    private readonly IResourceService _service;
+
+    public ResourceController(IResourceService service) => _service = service;
+
+    [HttpGet("{id:guid}")]
+    public async Task&lt;IActionResult&gt; GetAsync(Guid id)
+    {
+        try
+        {
+            var result = await _service.GetDetailAsync(id);
+            return Ok(ApiResponse&lt;ResourceDto&gt;.Ok(result));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(ApiResponse&lt;ResourceDto&gt;.Fail(ex.Message));
+        }
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    public async Task&lt;IActionResult&gt; CreateAsync([FromBody] CreateResourceRequest request)
+    {
+        try
+        {
+            await _service.CreateAsync(request);
+            return Ok(ApiResponse&lt;object&gt;.Ok());
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ApiResponse&lt;object&gt;.Fail(ex.Message));
+        }
+    }
+}</code></pre>
+</div>
+
+<h2>Catch-all error handler</h2>
+<p>An <code>[ApiExplorerSettings(IgnoreApi = true)]</code> controller hooked up via <code>app.UseExceptionHandler("/Error")</code> catches anything that slips past controller-level try/catch, so a raw 500 never leaks a stack trace to the client.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ErrorController.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[ApiExplorerSettings(IgnoreApi = true)]
+public class ErrorController : ControllerBase
+{
+    [Route("/error")]
+    public IActionResult HandleError()
+        => StatusCode(500, ApiResponse&lt;string&gt;.Fail("An unexpected error occurred."));
+}</code></pre>
+</div>
+
+<h2>Custom JSON converter: force UTC</h2>
+<p>Registered once via <code>AddJsonOptions</code>, this guarantees every <code>DateTime</code> in and out of the API is treated as UTC — a common source of silent bugs when the client and server are in different time zones.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>UtcDateTimeJsonConverter.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class UtcDateTimeJsonConverter : JsonConverter&lt;DateTime&gt;
+{
+    public override DateTime Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        => DateTime.SpecifyKind(reader.GetDateTime(), DateTimeKind.Utc);
+
+    public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options)
+        => writer.WriteStringValue(
+            DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
+}
+
+// Program.cs
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.Converters.Add(new UtcDateTimeJsonConverter());
+});</code></pre>
+</div>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

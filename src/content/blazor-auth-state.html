@@ -1,0 +1,168 @@
+<h1>JWT Auth State (Blazor)</h1>
+<p class="lede">How a Blazor WASM/Server app keeps track of "who's logged in" from a raw JWT string: a custom <code>AuthenticationStateProvider</code>, a <code>DelegatingHandler</code> that attaches the token to outgoing requests, and a small parser to turn the token's payload into <code>Claims</code>.</p>
+
+<h2>1. Storage</h2>
+<p>A thin wrapper around <code>sessionStorage</code> via JS interop. Swap for <code>localStorage</code> calls if you want the session to survive a browser restart.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>SessionStorageService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class SessionStorageService
+{
+    private readonly IJSRuntime _js;
+    public SessionStorageService(IJSRuntime js) => _js = js;
+
+    public async Task SetItemAsync(string key, string value)
+        => await _js.InvokeVoidAsync("sessionStorage.setItem", key, value);
+
+    public async Task&lt;string?&gt; GetItemAsync(string key)
+        => await _js.InvokeAsync&lt;string?&gt;("sessionStorage.getItem", key);
+
+    public async Task RemoveItemAsync(string key)
+        => await _js.InvokeVoidAsync("sessionStorage.removeItem", key);
+}</code></pre>
+</div>
+
+<h2>2. Parsing the JWT payload into Claims</h2>
+<p>No library needed — a JWT's middle segment is base64url-encoded JSON. Decode it, deserialize to a dictionary, and turn each entry into a <code>Claim</code>.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>ParseJWT.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class ParseJWT
+{
+    public static List&lt;Claim&gt; GetClaims(string token)
+    {
+        var payload = token.Split('.').ElementAtOrDefault(1);
+        if (payload is null) return [];
+
+        // base64url -> base64
+        payload = payload.Replace('-', '+').Replace('_', '/');
+        payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(payload); }
+        catch { return []; }
+
+        var dict = JsonSerializer.Deserialize&lt;Dictionary&lt;string, JsonElement&gt;&gt;(bytes);
+        if (dict is null) return [];
+
+        var claims = new List&lt;Claim&gt;();
+        foreach (var pair in dict)
+        {
+            if (pair.Value.ValueKind == JsonValueKind.Array)
+                foreach (var item in pair.Value.EnumerateArray())
+                    claims.Add(new Claim(pair.Key, item.ToString()));
+            else if (pair.Value.ValueKind != JsonValueKind.Null)
+                claims.Add(new Claim(pair.Key, pair.Value.ToString()));
+        }
+        return claims;
+    }
+}</code></pre>
+</div>
+
+<h2>3. The AuthenticationStateProvider</h2>
+<p>Blazor asks this class "who is the current user?" — it reads the stored token, checks the <code>exp</code> claim itself (no server round-trip needed), and builds a <code>ClaimsPrincipal</code> from it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>AuthStateProvider.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class AuthStateProvider : AuthenticationStateProvider
+{
+    private const string TokenKey = "AUTH_TOKEN";
+    private readonly AuthenticationState _anonymous =
+        new(new ClaimsPrincipal(new ClaimsIdentity()));
+    private readonly SessionStorageService _storage;
+
+    public AuthStateProvider(SessionStorageService storage) => _storage = storage;
+
+    public override async Task&lt;AuthenticationState&gt; GetAuthenticationStateAsync()
+    {
+        var token = await _storage.GetItemAsync(TokenKey);
+        if (string.IsNullOrWhiteSpace(token)) return _anonymous;
+
+        var claims = ParseJWT.GetClaims(token);
+        if (IsExpired(claims))
+        {
+            await _storage.RemoveItemAsync(TokenKey);
+            return _anonymous;
+        }
+
+        return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(claims, "JWT")));
+    }
+
+    public async Task MarkUserAsAuthenticatedAsync(string token)
+    {
+        await _storage.SetItemAsync(TokenKey, token);
+        var claims = ParseJWT.GetClaims(token);
+        NotifyAuthenticationStateChanged(Task.FromResult(
+            new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(claims, "JWT")))));
+    }
+
+    public async Task MarkUserAsLoggedOutAsync()
+    {
+        await _storage.RemoveItemAsync(TokenKey);
+        NotifyAuthenticationStateChanged(Task.FromResult(_anonymous));
+    }
+
+    public async Task&lt;string?&gt; GetTokenAsync() => await _storage.GetItemAsync(TokenKey);
+
+    private static bool IsExpired(List&lt;Claim&gt; claims)
+    {
+        var exp = claims.FirstOrDefault(c => c.Type == "exp");
+        if (exp is null || !long.TryParse(exp.Value, out var seconds)) return true;
+        return DateTimeOffset.FromUnixTimeSeconds(seconds) &lt;= DateTimeOffset.UtcNow;
+    }
+}</code></pre>
+</div>
+
+<h2>4. Attaching the token to every HTTP call</h2>
+<p>A <code>DelegatingHandler</code> plugged into the named <code>HttpClient</code> means no service ever has to remember to add the header manually.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>AuthTokenHandler.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class AuthTokenHandler : DelegatingHandler
+{
+    private readonly AuthStateProvider _authState;
+    public AuthTokenHandler(AuthStateProvider authState) => _authState = authState;
+
+    protected override async Task&lt;HttpResponseMessage&gt; SendAsync(
+        HttpRequestMessage request, CancellationToken ct)
+    {
+        var token = await _authState.GetTokenAsync();
+        if (!string.IsNullOrWhiteSpace(token))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        return await base.SendAsync(request, ct);
+    }
+}</code></pre>
+</div>
+
+<h2>5. Wiring it up</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs (Blazor)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">builder.Services.AddSingleton&lt;SessionStorageService&gt;();
+builder.Services.AddSingleton&lt;AuthStateProvider&gt;();
+builder.Services.AddSingleton&lt;AuthenticationStateProvider&gt;(sp =>
+    sp.GetRequiredService&lt;AuthStateProvider&gt;());
+
+builder.Services.AddTransient&lt;AuthTokenHandler&gt;();
+builder.Services.AddAuthorizationCore();
+
+builder.Services.AddHttpClient("", options =>
+{
+    options.BaseAddress = new Uri(builder.Configuration["ApiBaseUrl"]!);
+}).AddHttpMessageHandler&lt;AuthTokenHandler&gt;();</code></pre>
+</div>

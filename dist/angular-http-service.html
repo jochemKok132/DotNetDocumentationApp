@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP Service Wrapper · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html" class="active" aria-current="page">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>HTTP Service Wrapper</h1>
+<p class="lede">The Angular counterpart to <a href="http-service.html">HTTP Service Wrapper (Blazor)</a>: one generic <code>ApiService</code> every feature service calls through, so error handling and the <code>ApiResponse&lt;T&gt;</code> envelope (see <a href="api-response.html">ApiResponse &amp; Controllers</a>) are handled in exactly one place. The <code>authInterceptor</code> from the previous page already attaches the token, so this service never touches auth directly.</p>
+
+<h2>The envelope, mirrored in TypeScript</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>api-response.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">export interface ApiResponse&lt;T&gt; {
+  value: T | null;
+  succeeded: boolean;
+  message: string | null;
+}</code></pre>
+</div>
+
+<h2>Generic wrapper over HttpClient</h2>
+<div class="code-block">
+  <div class="code-block-label">
+    <span>api.service.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable, catchError, of } from 'rxjs';
+import { ApiResponse } from './api-response';
+import { environment } from '../environments/environment';
+
+@Injectable({ providedIn: 'root' })
+export class ApiService {
+  private readonly baseUrl = environment.apiBaseUrl;
+
+  constructor(private http: HttpClient) {}
+
+  get&lt;T&gt;(url: string): Observable&lt;ApiResponse&lt;T&gt;&gt; {
+    return this.http
+      .get&lt;ApiResponse&lt;T&gt;&gt;(`${this.baseUrl}${url}`)
+      .pipe(catchError((err) =&gt; this.handleError&lt;T&gt;(err)));
+  }
+
+  post&lt;T&gt;(url: string, body: unknown): Observable&lt;ApiResponse&lt;T&gt;&gt; {
+    return this.http
+      .post&lt;ApiResponse&lt;T&gt;&gt;(`${this.baseUrl}${url}`, body)
+      .pipe(catchError((err) =&gt; this.handleError&lt;T&gt;(err)));
+  }
+
+  put&lt;T&gt;(url: string, body: unknown): Observable&lt;ApiResponse&lt;T&gt;&gt; {
+    return this.http
+      .put&lt;ApiResponse&lt;T&gt;&gt;(`${this.baseUrl}${url}`, body)
+      .pipe(catchError((err) =&gt; this.handleError&lt;T&gt;(err)));
+  }
+
+  delete&lt;T&gt;(url: string): Observable&lt;ApiResponse&lt;T&gt;&gt; {
+    return this.http
+      .delete&lt;ApiResponse&lt;T&gt;&gt;(`${this.baseUrl}${url}`)
+      .pipe(catchError((err) =&gt; this.handleError&lt;T&gt;(err)));
+  }
+
+  postFormData&lt;T&gt;(url: string, formData: FormData): Observable&lt;ApiResponse&lt;T&gt;&gt; {
+    return this.http
+      .post&lt;ApiResponse&lt;T&gt;&gt;(`${this.baseUrl}${url}`, formData)
+      .pipe(catchError((err) =&gt; this.handleError&lt;T&gt;(err)));
+  }
+
+  private handleError&lt;T&gt;(error: unknown): Observable&lt;ApiResponse&lt;T&gt;&gt; {
+    const message =
+      error instanceof Object &amp;&amp; 'error' in error
+        ? (error as any).error?.message ?? 'An unexpected error occurred.'
+        : 'An unexpected error occurred.';
+
+    return of({ value: null, succeeded: false, message });
+  }
+}</code></pre>
+</div>
+
+<h2>File upload — the Angular equivalent of Blazor's reflection-based multipart</h2>
+<p>No reflection needed in TypeScript — <code>FormData</code> is naturally a bag of string/Blob entries, so building it is direct rather than needing the property-walking trick from the Blazor page.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>usage — building FormData</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">uploadResource(name: string, image: File): Observable&lt;ApiResponse&lt;void&gt;&gt; {
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('image', image, image.name);
+
+  return this.api.postFormData&lt;void&gt;('/resource', formData);
+}</code></pre>
+</div>
+
+<h2>A feature service on top</h2>
+<p>Same idea as the Blazor page's <code>ResourceService</code> — thin, one line per endpoint, all the error handling already lives in <code>ApiService</code>.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>resource.service.ts</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-typescript">import { Injectable } from '@angular/core';
+import { Observable } from 'rxjs';
+import { ApiService } from './api.service';
+import { ApiResponse } from './api-response';
+import { ResourceDto } from './resource.dto';
+
+@Injectable({ providedIn: 'root' })
+export class ResourceService {
+  constructor(private api: ApiService) {}
+
+  getAll(): Observable&lt;ApiResponse&lt;ResourceDto[]&gt;&gt; {
+    return this.api.get&lt;ResourceDto[]&gt;('/resource');
+  }
+
+  create(request: { name: string }): Observable&lt;ApiResponse&lt;object&gt;&gt; {
+    return this.api.post&lt;object&gt;('/resource', request);
+  }
+}</code></pre>
+</div>
+
+<blockquote>Because every method returns an <code>ApiResponse&lt;T&gt;</code> — including the caught-error case — a component's subscribe callback never needs a separate <code>error:</code> handler; it checks <code>response.succeeded</code> the same way whether the request failed at the network layer or the API returned <code>succeeded: false</code> on purpose.</blockquote>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>
