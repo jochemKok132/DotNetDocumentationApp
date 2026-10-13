@@ -366,6 +366,7 @@ public void CalculateNewRating_ExceedsMax_ClampedToMax()
 
 <blockquote>Rule of thumb for which attribute to reach for: <code>[Fact]</code> when the scenario needs its own realistic setup (mocked repositories, a request object with several fields) or tests a specific named boundary; <code>[Theory]</code> when you're really testing the same input→output relationship across a range of values — valid/invalid ranges, edge cases at zero or the max. Mixing them in the same file, as above, is normal — a service usually has both kinds of logic.</blockquote>
 
+
     </article>
   </main>
 </div>

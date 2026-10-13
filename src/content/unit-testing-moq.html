@@ -6,37 +6,47 @@
 
 <div class="code-block">
   <div class="code-block-label">
-    <span>ResourceServiceTests.cs</span>
+    <span>EloServiceTests.cs</span>
     <button class="copy-btn">Copy</button>
   </div>
-  <pre><code class="language-csharp">public class ResourceServiceTests
+  <pre><code class="language-csharp">public class EloServiceTests
 {
     private readonly Mock&lt;ICategoryRepository&gt; _categoryRepositoryMock;
     private readonly Mock&lt;IRatingRepository&gt; _ratingRepositoryMock;
+    private readonly Mock&lt;IMatchRepository&gt; _matchRepositoryMock;
+    private readonly Mock&lt;IMatchParticipantRepository&gt; _participantRepositoryMock;
     private readonly Mock&lt;IUserRepository&gt; _userRepositoryMock;
     private readonly LeaderboardService _leaderboardService;
     private readonly EloService _sut; // "system under test"
 
-    public ResourceServiceTests()
+    public EloServiceTests()
     {
         _categoryRepositoryMock = new Mock&lt;ICategoryRepository&gt;();
         _ratingRepositoryMock = new Mock&lt;IRatingRepository&gt;();
+        _matchRepositoryMock = new Mock&lt;IMatchRepository&gt;();
+        _participantRepositoryMock = new Mock&lt;IMatchParticipantRepository&gt;();
         _userRepositoryMock = new Mock&lt;IUserRepository&gt;();
 
-        // LeaderboardService has no interface and is a lightweight in-memory cache,
-        // so a real instance is used rather than a mock — nothing to fake here.
+        // LeaderboardService (see Elo Rating System) has no interface and is a
+        // lightweight in-memory cache, so a real instance is used rather than a mock —
+        // nothing to fake here.
         _leaderboardService = new LeaderboardService();
 
         _sut = new EloService(
             _categoryRepositoryMock.Object,
             _ratingRepositoryMock.Object,
+            _matchRepositoryMock.Object,
+            _participantRepositoryMock.Object,
             _userRepositoryMock.Object,
             _leaderboardService);
     }
+
+    private static Rating CreateRating(Guid userId, Guid categoryId, double currentRating, int matchCount)
+        =&gt; new() { UserId = userId, CategoryId = categoryId, CurrentRating = currentRating, MatchCount = matchCount, PeakRating = currentRating };
 }</code></pre>
 </div>
 
-<p>That comment matters as a rule, not just a note: mock the things that would otherwise hit a database, the network, or the clock — not every collaborator on principle. A pure, dependency-free helper class is cheaper and more honest to use for real.</p>
+<p>That comment matters as a rule, not just a note: mock the things that would otherwise hit a database, the network, or the clock — not every collaborator on principle. A pure, dependency-free helper class is cheaper and more honest to use for real. A small private factory method (<code>CreateRating</code> above) for the awkward-to-construct types keeps every test's setup short and focused on what actually varies between tests.</p>
 
 <h2>Naming convention: MethodName_Scenario_ExpectedResult</h2>
 <p>A failing test name alone should tell you what broke without opening the file — <code>RecordMatchAsync_CategoryNotFound_ThrowsInvalidOperationException</code> says exactly what was called, under what condition, and what should've happened.</p>
@@ -46,7 +56,7 @@
 
 <div class="code-block">
   <div class="code-block-label">
-    <span>a full test</span>
+    <span>a full test — individual match, both players update</span>
     <button class="copy-btn">Copy</button>
   </div>
   <pre><code class="language-csharp">[Fact]
@@ -61,6 +71,7 @@ public async Task RecordMatchAsync_IndividualMatch_UpdatesBothPlayersAndReturnsR
     var request = new RecordMatchRequest
     {
         CategoryId = category.Id,
+        MatchType = "Individual",
         Participants = new List&lt;MatchParticipantInput&gt;
         {
             new() { UserId = userA.Id, Placement = 1 },
@@ -80,25 +91,8 @@ public async Task RecordMatchAsync_IndividualMatch_UpdatesBothPlayersAndReturnsR
     Assert.True(result.Results.Single(r => r.UserId == userA.Id).RatingChange &gt; 0);
     Assert.True(result.Results.Single(r => r.UserId == userB.Id).RatingChange &lt; 0);
     _ratingRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny&lt;Rating&gt;()), Times.Exactly(2));
+    _matchRepositoryMock.Verify(repo => repo.UpdateAsync(It.Is&lt;Match&gt;(m => m.IsFinalized)), Times.Once);
 }</code></pre>
-</div>
-
-<p>A small private factory method (<code>CreateRating</code> below) for the awkward-to-construct types keeps every test's Arrange section short and focused on what actually varies between tests.</p>
-
-<div class="code-block">
-  <div class="code-block-label">
-    <span>test data builder</span>
-    <button class="copy-btn">Copy</button>
-  </div>
-  <pre><code class="language-csharp">private static Rating CreateRating(Guid userId, Guid categoryId, double currentRating, int matchCount)
-    => new()
-    {
-        UserId = userId,
-        CategoryId = categoryId,
-        CurrentRating = currentRating,
-        MatchCount = matchCount,
-        PeakRating = currentRating,
-    };</code></pre>
 </div>
 
 <h2>Setting up return values — including "not found"</h2>
@@ -117,16 +111,26 @@ _categoryRepositoryMock.Setup(repo => repo.GetByIdAsync(missingId)).ReturnsAsync
 </div>
 
 <h2>Verify — did the right thing get called, the right number of times?</h2>
-<p><code>It.IsAny&lt;T&gt;()</code> when you don't care about the argument's exact value, <code>It.Is&lt;T&gt;(predicate)</code> when you do. <code>Times.Exactly(n)</code> / <code>Times.Once</code> / <code>Times.Never</code> catch bugs a return-value assertion alone would miss — like a loop that updates the same record twice.</p>
+<p><code>It.IsAny&lt;T&gt;()</code> when you don't care about the argument's exact value, <code>It.Is&lt;T&gt;(predicate)</code> when you do. <code>Times.Exactly(n)</code> / <code>Times.Once</code> / <code>Times.Never</code> catch bugs a return-value assertion alone would miss — a team match with 4 participants should update exactly 4 ratings, not 2 or 8.</p>
 
 <div class="code-block">
   <div class="code-block-label">
-    <span>Verify</span>
+    <span>Verify — a team match updates every member on both teams</span>
     <button class="copy-btn">Copy</button>
   </div>
-  <pre><code class="language-csharp">_ratingRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny&lt;Rating&gt;()), Times.Exactly(2));
-_matchRepositoryMock.Verify(repo => repo.UpdateAsync(It.Is&lt;Match&gt;(m => m.IsFinalized)), Times.Once);
-_categoryRepositoryMock.Verify(repo => repo.AddAsync(It.IsAny&lt;Category&gt;()), Times.Never);</code></pre>
+  <pre><code class="language-csharp">[Fact]
+public async Task RecordMatchAsync_TeamMatch_UpdatesEveryMemberOnBothTeams()
+{
+    // ... arrange two teams of two players each (see Elo Rating System for ProcessTeamMatchAsync) ...
+
+    var result = await _sut.RecordMatchAsync(request);
+
+    Assert.Equal(4, result.Results.Count);
+    Assert.All(result.Results.Where(r => r.TeamId == teamOneId), r => Assert.True(r.RatingChange &gt; 0));
+    Assert.All(result.Results.Where(r => r.TeamId == teamTwoId), r => Assert.True(r.RatingChange &lt; 0));
+    _ratingRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny&lt;Rating&gt;()), Times.Exactly(4));
+    _participantRepositoryMock.Verify(repo => repo.AddAsync(It.IsAny&lt;MatchParticipant&gt;()), Times.Exactly(4));
+}</code></pre>
 </div>
 
 <h2>Callback — capturing what was actually passed</h2>
@@ -152,6 +156,7 @@ public async Task CreateCategoryAsync_ValidRequest_Persists()
     Assert.NotNull(captured);
     Assert.Equal("Chess", captured!.Name);
     Assert.True(captured.IsActive); // asserts a default the request itself never set
+    _categoryRepositoryMock.Verify(repo => repo.AddAsync(It.Is&lt;Category&gt;(c => c.Name == "Chess")), Times.Once);
 }</code></pre>
 </div>
 
@@ -171,11 +176,32 @@ public async Task RecordMatchAsync_CategoryNotFound_ThrowsInvalidOperationExcept
         .ReturnsAsync((Category?)null);
 
     await Assert.ThrowsAsync&lt;InvalidOperationException&gt;(() => _sut.RecordMatchAsync(request));
+}
+
+[Fact]
+public async Task RecordMatchAsync_TeamMatchWithOneTeam_ThrowsInvalidOperationException()
+{
+    // a team match needs at least 2 teams to have anyone to play against —
+    // this guards the same invariant RecordMatchAsync's team path checks
+    var request = new RecordMatchRequest
+    {
+        CategoryId = Guid.NewGuid(),
+        MatchType = "team",
+        Participants = new List&lt;MatchParticipantInput&gt;
+        {
+            new() { UserId = Guid.NewGuid(), Placement = 1, TeamId = Guid.NewGuid() },
+        },
+    };
+
+    _categoryRepositoryMock.Setup(repo => repo.GetByIdAsync(request.CategoryId))
+        .ReturnsAsync(new Category { Id = request.CategoryId });
+
+    await Assert.ThrowsAsync&lt;InvalidOperationException&gt;(() => _sut.RecordMatchAsync(request));
 }</code></pre>
 </div>
 
 <h2>Bonus: <code>[Theory]</code> for pure functions</h2>
-<p>A stateless calculation (no repositories, nothing to mock at all) doesn't need <code>[Fact]</code> per case — <code>[Theory]</code> with <code>[InlineData]</code> runs the same assertion against a table of inputs, so adding a new edge case is one line instead of a whole new test method.</p>
+<p>A stateless calculation (no repositories, nothing to mock at all) doesn't need <code>[Fact]</code> per case — <code>[Theory]</code> with <code>[InlineData]</code> runs the same assertion against a table of inputs, so adding a new edge case is one line instead of a whole new test method. This is exactly the shape for testing the <a href="elo-rating-system.html">EloCalculationService</a> methods — <code>GetKFactor</code>'s tier boundaries, score validity ranges, and so on.</p>
 
 <div class="code-block">
   <div class="code-block-label">
@@ -195,6 +221,25 @@ public void IsValidActualScore_VariousValues_ReturnsExpected(double score, bool 
     Assert.Equal(expected, result);
 }
 
+// boundary cases get their own [Fact]s even next to a [Theory] on the same
+// method — GetKFactor's tier cutoffs (9 vs 10, 29 vs 30) are exactly where
+// an off-by-one bug would hide, so each boundary is named explicitly
+[Fact]
+public void GetKFactor_BoundaryAtNine_Returns40()
+{
+    var result = EloCalculationService.GetKFactor(9);
+
+    Assert.Equal(40, result);
+}
+
+[Fact]
+public void GetKFactor_BoundaryAtTen_Returns20()
+{
+    var result = EloCalculationService.GetKFactor(10);
+
+    Assert.Equal(20, result);
+}
+
 [Fact]
 public void CalculateNewRating_ExceedsMax_ClampedToMax()
 {
@@ -204,4 +249,5 @@ public void CalculateNewRating_ExceedsMax_ClampedToMax()
 }</code></pre>
 </div>
 
-<blockquote>Rule of thumb for which attribute to reach for: <code>[Fact]</code> when the scenario needs its own realistic setup (mocked repositories, a request object with several fields); <code>[Theory]</code> when you're really testing the same input→output relationship across a range of values — boundary conditions, valid/invalid ranges, edge cases at zero or the max. Mixing them in the same file, as above, is normal — a service usually has both kinds of logic.</blockquote>
+<blockquote>Rule of thumb for which attribute to reach for: <code>[Fact]</code> when the scenario needs its own realistic setup (mocked repositories, a request object with several fields) or tests a specific named boundary; <code>[Theory]</code> when you're really testing the same input→output relationship across a range of values — valid/invalid ranges, edge cases at zero or the max. Mixing them in the same file, as above, is normal — a service usually has both kinds of logic.</blockquote>
+

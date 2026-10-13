@@ -102,7 +102,7 @@ public class Password : IPassword
 </div>
 
 <h2>API wiring: JWT bearer, rate limiter, Swagger security</h2>
-<p>All three registered together in one <code>RegisterAPI</code> extension (see <a href="index.html">Layered Architecture</a>). The rate limiter partitions by user ID when authenticated, falling back to IP for anonymous requests.</p>
+<p>All three registered together in one <code>RegisterAPI</code> extension (see <a href="index.html">Layered Architecture</a>). The rate limiter partitions by user ID when authenticated, falling back to IP for anonymous requests. Both the auth failures below and the rate limiter's rejection are wired to return the same <a href="api-response.html">ApiResponse envelope</a> as every other endpoint, so the frontend's error handling never needs a special case for "the request got rejected before it reached a controller."</p>
 
 <div class="code-block">
   <div class="code-block-label">
@@ -131,6 +131,31 @@ public class Password : IPassword
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
             ClockSkew = TimeSpan.Zero
         };
+
+        // without this, an unauthenticated or unauthorized request gets an
+        // empty 401/403 body — JwtBearerEvents lets it return the same
+        // ApiResponse envelope as every other endpoint instead
+        options.Events = new JwtBearerEvents
+        {
+            OnChallenge = async context =>
+            {
+                context.HandleResponse(); // skip the default empty-body response
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/json";
+
+                var response = ApiResponse&lt;object&gt;.Fail("You are not logged in.");
+                await context.Response.WriteAsJsonAsync(response);
+            },
+
+            OnForbidden = async context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = "application/json";
+
+                var response = ApiResponse&lt;object&gt;.Fail("You don't have access to this.");
+                await context.Response.WriteAsJsonAsync(response);
+            }
+        };
     });
 
     services.AddAuthorization();
@@ -153,6 +178,17 @@ private static IServiceCollection RegisterRateLimiter(this IServiceCollection se
                     AutoReplenishment = true,
                     Window = TimeSpan.FromMinutes(1)
                 }));
+
+        // same ApiResponse envelope used everywhere else — a 429 shouldn't look
+        // different from any other failure response the frontend already handles
+        options.OnRejected = async (context, cancellationToken) =>
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.HttpContext.Response.ContentType = "application/json";
+
+            var response = ApiResponse&lt;object&gt;.Fail("Rate limit exceeded. Try again later.");
+            await context.HttpContext.Response.WriteAsJsonAsync(response, cancellationToken);
+        };
     });
     return services;
 }
@@ -175,3 +211,4 @@ private static IServiceCollection RegisterSwagger(this IServiceCollection servic
     return services;
 }</code></pre>
 </div>
+
