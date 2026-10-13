@@ -1,59 +1,48 @@
-name: Deploy latest release
+name: Build & publish Docker image
 
-# Fires only when a GitHub Release is published (not on every push), so the
-# site in production always matches a tagged, intentional version — never a
-# half-finished commit on main.
+# Fires only when a GitHub Release is published, so the image on the
+# registry always corresponds to a tagged, intentional version.
 on:
   release:
     types: [published]
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # lets this workflow push to GHCR with the built-in token
+
     steps:
       - uses: actions/checkout@v4
         with:
-          # The release event already points at the tagged commit; this just
-          # makes that explicit instead of relying on the default ref.
           ref: ${{ github.event.release.tag_name }}
 
-      - uses: actions/setup-node@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          node-version: '20'
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN is provided automatically by Actions — no secret to create,
+          # nothing to rotate, and it never leaves GitHub's own infrastructure.
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build static site
-        run: node build.js
+      - name: Compute image name (GHCR requires lowercase)
+        id: image
+        run: echo "name=${REGISTRY}/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to server (releases/<version> + atomic symlink swap)
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.event.release.tag_name }}
+            ${{ steps.image.outputs.name }}:latest
 
-          TAG="${{ github.event.release.tag_name }}"
-          RELEASE_DIR="/var/www/docs/releases/$TAG"
-
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$RELEASE_DIR'"
-
-          # Ship this release's build into its own folder — never into the
-          # folder nginx is currently serving.
-          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" \
-            ./dist/ "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE_DIR/"
-
-          # Flip the "current" symlink to the new release in one atomic `ln`.
-          # nginx (see nginx.conf in Dockerizing for nginx) always serves
-          # through /var/www/docs/current, so this instant is the entire
-          # deploy — no half-updated directory is ever visible to a request,
-          # and there's zero nginx reload or container restart involved.
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "ln -sfn '$RELEASE_DIR' /var/www/docs/current"
-
-          # Keep the last 5 releases on disk for instant rollback
-          # (just re-point the symlink at an older folder), prune anything older.
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd /var/www/docs/releases && ls -1dt */ | tail -n +6 | xargs -r rm -rf"
+# No SSH, no server secrets, no inbound connection to the server at all.
+# The server side pulls instead of being pushed to — see Watchtower in
+# "Versioned Releases & Auto-Deploy".

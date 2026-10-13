@@ -114,139 +114,144 @@
   <main class="content">
     <article class="doc">
 <h1>Versioned Releases &amp; Auto-Deploy</h1>
-<p class="lede">Tag a GitHub Release, and the server updates to it automatically — no manual <code>git pull</code>, no SSH session, no nginx reload. The trick is a single <code>current</code> symlink: deploying is just re-pointing it, so it's also the instant rollback mechanism.</p>
+<p class="lede">Tag a GitHub Release, and the server updates to it automatically — with nothing ever reaching <em>into</em> the server from the outside. The server pulls the new version itself, so there's no SSH key to manage, no port to forward on the router, and no inbound firewall rule needed at all.</p>
 
-<h2>Why a symlink instead of deploying into one fixed folder</h2>
-<p>Deploying straight into the folder nginx serves from means there's a window — however short — where half the new files are written and half the old ones remain, and a request landing in that window gets a broken mix of versions. Writing each release into its <em>own</em> folder and only then flipping one symlink avoids that window entirely: nginx resolves the symlink fresh on every request, so from nginx's point of view the switch is a single atomic step, not a gradual overwrite.</p>
+<h2>Why pull beats push for a server that isn't an always-reachable cloud box</h2>
+<p>The obvious way to "deploy automatically" is to have CI SSH into the server and push the new files there. That works fine for a VPS with a public IP you control — but for a server sitting behind a home router (a laptop, a NAS, anything without its own dedicated public IP), it means fighting port forwarding, dynamic DNS, and exposing SSH to the open internet just to let a GitHub Action in once in a while.</p>
+<p>Flip the direction instead: GitHub pushes a built <strong>image</strong> to a registry (not to the server), and something running <em>on</em> the server periodically checks the registry and pulls when there's something new. Pulling is an outbound connection — the server already does that constantly for any other internet access — so nothing needs to be opened up for the outside world to reach in.</p>
 
-<div class="code-block">
-  <div class="code-block-label">
-    <span>layout on the server</span>
-    <button class="copy-btn">Copy</button>
-  </div>
-  <pre><code class="language-text">/var/www/docs/
-├── releases/
-│   ├── v1.0.0/        ← full build output, never touched again
-│   ├── v1.1.0/
-│   └── v1.2.0/
-└── current -> releases/v1.2.0/   ← nginx always reads through here</code></pre>
-</div>
-
-<p>Rolling back a bad release is <code>ln -sfn releases/v1.1.0 current</code> — no rebuild, no redeploy, just pointing the symlink at a folder that's already known to work.</p>
-
-<h2>What "version" means here: package.json, read at build time</h2>
-<p>The version number isn't invented at deploy time — it's whatever's already in <code>package.json</code>, which a GitHub Release bump is what actually changes. <code>build.js</code> reads it once and stamps it into every page's footer, so the running site can always tell you exactly which release it is.</p>
+<h2>Step 1: the app builds into a Docker image</h2>
+<p>A small multi-stage Dockerfile: one stage runs the normal build, the other stage is just nginx serving whatever came out of it. The image itself is the deployable artifact — not a folder of files copied over SSH.</p>
 
 <div class="code-block">
   <div class="code-block-label">
-    <span>package.json</span>
+    <span>Dockerfile</span>
     <button class="copy-btn">Copy</button>
   </div>
-  <pre><code class="language-json">{
-  "name": "your-docs-site",
-  "version": "1.2.0",
-  "private": true,
-  "scripts": { "build": "node build.js" }
-}</code></pre>
+  <pre><code class="language-dockerfile">FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json build.js nav.config.js ./
+COPY src ./src
+RUN node build.js
+
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80</code></pre>
 </div>
 
-<div class="code-block">
-  <div class="code-block-label">
-    <span>build.js (excerpt)</span>
-    <button class="copy-btn">Copy</button>
-  </div>
-  <pre><code class="language-javascript">const VERSION = require('./package.json').version;
-
-// ...per page:
-const html = template
-  .replace('{{TITLE}}', escapeHtml(item.title))
-  .replace('{{SIDEBAR}}', sidebar)
-  .replace('{{VERSION}}', escapeHtml(VERSION))
-  .replace('{{CONTENT}}', content);</code></pre>
-</div>
-
-<p>Bumping the version is a deliberate, reviewable change (<code>npm version minor</code>, or editing the field by hand in a PR) — not something CI invents from a commit count or a timestamp. That keeps the number meaningful: "1.2.0" is a decision someone made, not an artifact of how many times the pipeline happened to run.</p>
-
-<h2>The workflow: release published → build → ship → swap</h2>
-<p>Triggering on <code>release: published</code> rather than <code>push</code> to main is the key choice — it means production only ever moves forward when someone deliberately cuts a release (via the GitHub UI or <code>gh release create</code>), never on every merged commit. Day-to-day pushes to main can run their own build-and-test workflow (see <a href="ci-pipeline.html">CI Pipeline</a>) without ever touching the live site.</p>
+<h2>Step 2: on release, CI builds and pushes to GHCR — nothing else</h2>
+<p>GitHub Container Registry (GHCR) is just GitHub talking to GitHub: the workflow authenticates with the automatically-provided <code>GITHUB_TOKEN</code>, so there's no secret to create or rotate for this step, and no network path to the server involved at all yet.</p>
 
 <div class="code-block">
   <div class="code-block-label">
     <span>.github/workflows/release-deploy.yml</span>
     <button class="copy-btn">Copy</button>
   </div>
-  <pre><code class="language-yaml">name: Deploy latest release
+  <pre><code class="language-yaml">name: Build & publish Docker image
 
 on:
   release:
     types: [published]
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.release.tag_name }}
 
-      - uses: actions/setup-node@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          node-version: '20'
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build static site
-        run: node build.js
+      - name: Compute image name (GHCR requires lowercase)
+        id: image
+        run: echo "name=${REGISTRY}/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to server (releases/&lt;version&gt; + atomic symlink swap)
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-
-          TAG="${{ github.event.release.tag_name }}"
-          RELEASE_DIR="/var/www/docs/releases/$TAG"
-
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$RELEASE_DIR'"
-
-          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" \
-            ./dist/ "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE_DIR/"
-
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "ln -sfn '$RELEASE_DIR' /var/www/docs/current"
-
-          # keep the last 5 releases for instant rollback, prune the rest
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd /var/www/docs/releases && ls -1dt */ | tail -n +6 | xargs -r rm -rf"</code></pre>
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.event.release.tag_name }}
+            ${{ steps.image.outputs.name }}:latest</code></pre>
 </div>
 
-<blockquote>
-<p><code>rsync --delete</code> targets the <em>new</em> release's own folder (<code>$RELEASE_DIR</code>), never <code>current</code> — it's only cleaning up stray files within that one fresh directory, not touching whatever's currently live. The symlink swap is the only step that ever changes what nginx is serving.</p>
-<p>Three secrets carry the server access: <code>DEPLOY_HOST</code>, <code>DEPLOY_USER</code>, and a private key as <code>DEPLOY_SSH_KEY</code> (the matching public key goes in that user's <code>~/.ssh/authorized_keys</code> on the server — generate a deploy-only keypair, don't reuse a personal one). Same repository-secrets rule as everywhere else in this project: see <a href="ci-pipeline.html">CI Pipeline</a>.</p>
-</blockquote>
+<p>Two tags are pushed on every release: the exact version (<code>v1.2.0</code>) so a specific past build can always be pulled on purpose, and <code>latest</code>, which is the one the server actually watches.</p>
 
-<h2>Serving through the symlink: the one-line nginx change</h2>
-<p>nginx needs no reload when a release ships — it was already pointed at <code>current</code>, and the kernel resolves that symlink on every single request. Compare this to the earlier, simpler setup in <a href="docker-nginx.html">Dockerizing for nginx</a>, where a bind mount pointed straight at a fixed <code>dist/</code> folder:</p>
+<blockquote>By default a GHCR package is private, which means pulling it requires authentication even from your own server. Either run <code>docker login ghcr.io</code> on the server once with a personal access token that has <code>read:packages</code> scope, or — simplest for a personal project — make the package public from its settings page on GitHub after the first push, so the server can pull it with no credentials at all.</blockquote>
+
+<h2>Step 3: the server pulls on its own, via Watchtower</h2>
+<p><a href="https://containrrr.dev/watchtower/" target="_blank" rel="noopener">Watchtower</a> is a small container whose only job is watching other containers' images and restarting them when a newer version of the same tag appears in the registry. It runs entirely on the server side, polling outward — it never needs anything opened up to it from the internet.</p>
 
 <div class="code-block">
   <div class="code-block-label">
-    <span>nginx.conf (excerpt)</span>
+    <span>running the docs site, watched by Watchtower</span>
     <button class="copy-btn">Copy</button>
   </div>
-  <pre><code class="language-nginx">location /docs/ {
-    alias /var/www/docs/current/;
-    try_files $uri $uri.html $uri/ =404;
+  <pre><code class="language-bash"># the site itself — the image name comes from the repo's "Packages" page
+# on GitHub after the first release has built
+docker run -d \
+  --name docs-site \
+  --restart unless-stopped \
+  -p 8080:80 \
+  --label com.centurylinklabs.watchtower.enable=true \
+  ghcr.io/&lt;owner&gt;/&lt;repo&gt;:latest
+
+# watchtower itself — only touches containers labeled watchtower.enable=true,
+# checks for a new image every 5 minutes, and prunes the old image after swapping
+docker run -d \
+  --name watchtower \
+  --restart unless-stopped \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower \
+  --interval 300 \
+  --label-enable \
+  --cleanup</code></pre>
+</div>
+
+<p>From here, the loop is: tag a release → CI builds and pushes <code>:latest</code> → within 5 minutes Watchtower notices, pulls it, and restarts the <code>docs-site</code> container on the new image. No SSH session, no manual pull, no reload of anything on the host.</p>
+
+<h2>Wiring the host's existing nginx to the container</h2>
+<p>The container listens on <code>8080</code> on the host (<code>-p 8080:80</code>) rather than taking over port 80/443 directly, since those are already owned by whatever nginx install is fronting the server's other sites. That host nginx just reverse-proxies to the container instead of serving files from a folder directly:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>nginx site block on the host</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-nginx">server {
+    listen 80;
+    server_name yourdocs.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
 }</code></pre>
 </div>
 
-<h3>When this pattern is worth it over the simpler bind-mount setup</h3>
+<p>This is a one-time change. Once it's in place, nginx is just forwarding to whatever's listening on 8080 — it has no idea a new version even shipped, and never needs touching again.</p>
+
+<h3>When this pull-based pattern is worth it over the SSH/symlink version</h3>
 <ul>
-  <li>You want releases to be an explicit, reviewable event (cut from the GitHub UI, with release notes) rather than "whatever's on main right now."</li>
-  <li>You want rollback to be instant and not require a rebuild — just re-point the symlink.</li>
-  <li>The deploy target is a single always-on server reachable over SSH. For containerized or multi-instance deployments, the equivalent idea is tagging and pushing a versioned image and rolling it out through your orchestrator instead of symlink-swapping files on disk.</li>
+  <li>The server is behind a home router, CGNAT, or anything else without a straightforward, stable way to accept inbound connections.</li>
+  <li>You'd rather manage zero SSH keys for CI than one carefully-scoped deploy key.</li>
+  <li>The app is already (or easily) containerized — for something that genuinely has to stay a plain file on disk with no Docker involved, a push-based SSH + atomic symlink swap is still the simpler choice, it just needs the server to actually be reachable from wherever CI runs.</li>
 </ul>
 
     </article>
