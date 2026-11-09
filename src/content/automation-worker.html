@@ -1,0 +1,138 @@
+<h1>Periodic Automation Worker</h1>
+<p class="lede">A <code>BackgroundService</code> that wakes on a fixed interval, runs a short list of "is anything due?" steps through one orchestrating service, and only logs when it actually did something. Built on <code>PeriodicTimer</code>, so ticks never overlap and shutdown is clean.</p>
+
+<h2>When this shape fits</h2>
+<p><a href="background-jobs.html">Background Jobs</a> covers the basics of a hosted loop. This page is the variant for <em>several related chores on one schedule</em> — apply the price changes that have come into effect, create the stock counts that are due, place the orders that are due, generate next month's staff roster — where each chore is cheap to check and the whole run can happen every few minutes.</p>
+
+<h2>The worker: <code>PeriodicTimer</code> instead of <code>Task.Delay</code></h2>
+<p>A <code>while</code> loop with <code>Task.Delay</code> drifts: the delay starts <em>after</em> the work, so a 15-minute interval with a 2-minute run fires every 17. <code>PeriodicTimer</code> ticks on a fixed cadence, and if a run overruns it simply doesn't queue up extra ticks — the next <code>WaitForNextTickAsync</code> returns as soon as the work finishes.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/StockAutomationWorker.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class StockAutomationWorker(IServiceScopeFactory scopeFactory, ILogger&lt;StockAutomationWorker&gt; logger)
+    : BackgroundService
+{
+    public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(Interval);
+
+        // do/while: the first run happens immediately at startup, then once per tick
+        do
+        {
+            try
+            {
+                // singleton worker, scoped services: one fresh scope per run
+                using var scope = scopeFactory.CreateScope();
+
+                var automation = scope.ServiceProvider.GetRequiredService&lt;IStockAutomationService&gt;();
+                var result = await automation.RunAsync(DateTime.Today);
+
+                int weeks = await scope.ServiceProvider.GetRequiredService&lt;IScheduleService&gt;()
+                    .GenerateUpcomingWeeksAsync(DateOnly.FromDateTime(DateTime.Today));
+
+                // quiet when idle — a log line per 15 minutes of "nothing happened" is noise
+                if (weeks &gt; 0)
+                    logger.LogInformation("Staff schedule: {Weeks} week(s) generated.", weeks);
+
+                if (result.PricesApplied + result.ExpiryCountsCreated + result.AutomaticOrderLines + result.OrdersSent &gt; 0)
+                    logger.LogInformation(
+                        "Stock automation: {Prices} price(s) applied, {Counts} expiry count(s) created, {Lines} automatic order line(s), {Sent} order(s) sent.",
+                        result.PricesApplied, result.ExpiryCountsCreated, result.AutomaticOrderLines, result.OrdersSent);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // a failed run is logged and retried on the next tick; it never kills the loop
+                logger.LogError(exception, "Stock automation failed.");
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+}</code></pre>
+</div>
+
+<h2>One orchestrating service, steps that return counts</h2>
+<p>The worker knows nothing about prices or orders. It calls one application service that runs the steps in a fixed order and reports how many things each one did. The date comes in as a parameter, so the whole run can be tested with any "today".</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/Ordering/StockAutomationService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public record StockAutomationResult(int PricesApplied, int ExpiryCountsCreated, int AutomaticOrderLines, int OrdersSent);
+
+public class StockAutomationService(
+    IProductControlService productControlService,
+    IStockCountService stockCountService,
+    IPurchaseOrderService purchaseOrderService) : IStockAutomationService
+{
+    public async Task&lt;StockAutomationResult&gt; RunAsync(DateTime today)
+    {
+        int prices = await productControlService.ApplyDuePricesAsync(today);
+        int counts = await stockCountService.CreateExpiryCountsAsync(today);
+        int lines  = await purchaseOrderService.CreateAutomaticOrdersAsync(today);
+        int sent   = await purchaseOrderService.SendDueOrdersAsync(today);   // after the lines exist
+        return new StockAutomationResult(prices, counts, lines, sent);
+    }
+}</code></pre>
+</div>
+
+<p>The order of the steps is deliberate: automatic order lines are created before due orders are sent, so a line created this run can go out in the same run.</p>
+
+<h2>Make every step state-driven, so repeating it is harmless</h2>
+<p>The worker runs every 15 minutes and also runs again after a restart, so each step must be safe to run twice. The trick is to compare <em>what should be true today</em> with <em>what is true now</em>, rather than "do the thing and remember that you did". For scheduled prices, a product's price rows say what the price is from which date; the step finds the row in effect today and only writes when the product's stored price differs:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/ManagementApp/Stock/ProductControlService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task&lt;int&gt; ApplyDuePricesAsync(DateTime today)
+{
+    int applied = 0;
+    foreach (var product in await productRepository.GetProductsWithPricesAsync())
+    {
+        // the price row in effect today: latest start date that has already begun
+        var current = product.Prices
+            .Where(p =&gt; p.ValidFrom.Date &lt;= today.Date)
+            .OrderByDescending(p =&gt; p.ValidFrom.Date)
+            .ThenByDescending(p =&gt; p.CreatedAt)
+            .FirstOrDefault();
+
+        // nothing scheduled, or already applied: skip — this is what makes a rerun a no-op
+        if (current is null || current.Price == product.Price) continue;
+
+        product.Price = current.Price;
+        await productRepository.UpdateAsync(product);
+        applied++;
+    }
+    return applied;
+}</code></pre>
+</div>
+
+<p>The same idea runs through the sending step: it selects orders that are <em>open and due</em>, and once an order's status is <code>Sent</code> it no longer matches the query. A run that finds nothing due returns zeros — and the worker stays silent.</p>
+
+<h2>A switch to turn it off</h2>
+<p>Registration is conditional on configuration, defaulting to on. Tests or a second instance of the API can switch it off without a code change — important if two instances would otherwise both run the same chores.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/ConfigureServices.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">if (configuration.GetValue("StockAutomation:Enabled", true))
+    services.AddHostedService&lt;StockAutomationWorker&gt;();</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>"Today" is the server's local date.</strong> <code>DateTime.Today</code> uses the process time zone, which in a container is UTC unless you set it — "due today" would then flip at the wrong local hour. Set it in the final stage of the Dockerfile (the tzdata package must be installed for the name to resolve): <code>ENV TZ=Europe/Amsterdam</code>.</li>
+  <li><strong>One instance only.</strong> There's no lock around a run; two API instances would both execute every chore. Disable the worker on all but one, or add a distributed lock before scaling out.</li>
+  <li><strong>Catch everything except cancellation.</strong> The <code>when (exception is not OperationCanceledException)</code> filter lets shutdown propagate while a database blip just logs and waits for the next tick.</li>
+  <li><strong>Report counts, not just success.</strong> Returning how many things changed is what lets the worker log only meaningful runs — and gives a test something concrete to assert on.</li>
+  <li><strong>A new scope per run.</strong> Same rule as <a href="background-jobs.html">Background Jobs</a>: the worker is a singleton, repositories and the <code>DbContext</code> are not.</li>
+</ul>

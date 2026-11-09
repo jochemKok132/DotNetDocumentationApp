@@ -1,0 +1,163 @@
+<h1>Awaitable Confirm Dialog</h1>
+<p class="lede">Ask the user "are you sure?" with a single <code>await</code> in the middle of a method — no state flag, no second handler for the "yes" branch. A small scoped service holds a <code>TaskCompletionSource</code>, and one host component rendered once in the layout shows the modal.</p>
+
+<h2>Why a service instead of a component per page</h2>
+<p>The usual Blazor approach is a <code>showConfirm</code> bool, a modal in the markup, and a separate <code>OnConfirmed()</code> method that carries on with whatever the button started. That splits one decision across two methods and repeats the modal markup on every page. Here the call site reads top to bottom, exactly like <code>confirm()</code> in JavaScript, and the modal exists in one place.</p>
+
+<h2>The service</h2>
+<p>It never touches the UI. It stores the current request, raises <code>Changed</code>, and hands back a <code>Task&lt;bool&gt;</code> that completes when something calls <code>Answer</code>.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Services/ConfirmService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public record ConfirmRequest(
+    string Title,
+    string Message,
+    string ConfirmText,
+    bool Danger,
+    IReadOnlyList&lt;string&gt; Details);
+
+public class ConfirmService
+{
+    private TaskCompletionSource&lt;bool&gt;? pending;
+
+    public event Action? Changed;
+
+    public ConfirmRequest? Current { get; private set; }
+
+    public Task&lt;bool&gt; AskAsync(
+        string title,
+        string message,
+        string confirmText = "Confirm",
+        bool danger = false,
+        IReadOnlyList&lt;string&gt;? details = null)
+    {
+        // a new question replaces an unanswered one — the old caller gets "no"
+        // instead of hanging forever
+        pending?.TrySetResult(false);
+
+        pending = new TaskCompletionSource&lt;bool&gt;();
+        Current = new ConfirmRequest(title, message, confirmText, danger, details ?? []);
+        Changed?.Invoke();
+
+        return pending.Task;
+    }
+
+    public void Answer(bool confirmed)
+    {
+        var answer = pending;
+        pending = null;
+        Current = null;
+        Changed?.Invoke();
+
+        answer?.TrySetResult(confirmed);
+    }
+}</code></pre>
+</div>
+
+<h2>The host component</h2>
+<p>Rendered once, in the main layout. It subscribes to <code>Changed</code>, shows the modal whenever <code>Current</code> is set, and reports the button press back through <code>Answer</code>. Closing the overlay (click outside, Escape) counts as "no".</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Components/ConfirmHost.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">@implements IDisposable
+@inject ConfirmService Confirm
+
+@if (Confirm.Current is { } request)
+{
+    &lt;ModalOverlay OnClose="() =&gt; Confirm.Answer(false)" CssClass="confirm"&gt;
+        &lt;h3&gt;@request.Title&lt;/h3&gt;
+        &lt;p&gt;@request.Message&lt;/p&gt;
+
+        @if (request.Details.Count &gt; 0)
+        {
+            &lt;ul&gt;
+                @foreach (var detail in request.Details)
+                {
+                    &lt;li&gt;@detail&lt;/li&gt;
+                }
+            &lt;/ul&gt;
+        }
+
+        &lt;div class="form-actions"&gt;
+            &lt;button type="button" class="btn-cancel" @onclick="() =&gt; Confirm.Answer(false)"&gt;Cancel&lt;/button&gt;
+            &lt;button type="button" class="@(request.Danger ? "btn-delete" : "btn-save")"
+                    @onclick="() =&gt; Confirm.Answer(true)"&gt;@request.ConfirmText&lt;/button&gt;
+        &lt;/div&gt;
+    &lt;/ModalOverlay&gt;
+}
+
+@code {
+    protected override void OnInitialized() =&gt; Confirm.Changed += OnChanged;
+
+    // the event can fire from any thread's continuation — marshal back to the renderer
+    private void OnChanged() =&gt; InvokeAsync(StateHasChanged);
+
+    public void Dispose() =&gt; Confirm.Changed -= OnChanged;
+}</code></pre>
+</div>
+
+<h2>Registration</h2>
+<p>Scoped, so each browser tab (Blazor Server circuit or WASM instance) has its own — one user's confirmation can never appear on another user's screen. Drop the host into the layout once:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Program.cs + Layout/MainLayout.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">builder.Services.AddScoped&lt;ConfirmService&gt;();
+
+// MainLayout.razor, once, anywhere in the markup:
+// &lt;ConfirmHost /&gt;</code></pre>
+</div>
+
+<h2>Calling it</h2>
+<p>The optional <code>details</code> list is for "here's exactly what will happen" — the confirm dialog doubles as a summary of what's about to be saved. <code>danger: true</code> switches the button to the destructive style.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Pages/CustomerOrders.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">@inject ConfirmService Confirm
+
+@code {
+    private async Task CreateAsync()
+    {
+        var lines = request.Lines.Where(l =&gt; l.Amount &gt; 0).ToList();
+
+        if (!await Confirm.AskAsync(
+                "Create customer order",
+                $"Create an order for customer {request.CustomerId}?",
+                "Create",
+                details: lines.Select(l =&gt; $"{l.Amount} × {l.Barcode}").ToList()))
+            return;   // user said no (or closed the dialog)
+
+        busy = true;
+        var result = await CustomerOrderService.CreateAsync(request);
+        busy = false;
+        // ...
+    }
+
+    private async Task DeleteAsync(Product product)
+    {
+        if (!await Confirm.AskAsync("Delete product", $"Delete {product.Name}?", "Delete", danger: true))
+            return;
+
+        await ProductService.DeleteAsync(product.Id);
+    }
+}</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>Always unsubscribe.</strong> <code>ConfirmHost</code> implements <code>IDisposable</code> and removes its handler; a scoped service outlives a re-rendered layout, and a leaked handler keeps calling <code>StateHasChanged</code> on a dead component.</li>
+  <li><strong>One dialog at a time.</strong> Asking a second question before the first is answered resolves the first as "no" instead of stacking dialogs — which is what you want for double-clicked buttons.</li>
+  <li><strong>Scoped in Blazor Server means per-circuit.</strong> That's the right lifetime here; a singleton would share one dialog between every connected user — the same per-user isolation concern the <a href="toast-notifications.html">Toast Notification Service</a> page raises about static events.</li>
+  <li><strong>Guard the button too.</strong> Keep <code>busy</code> in the disabled expression so the user can't open the dialog twice while the save is running.</li>
+</ul>

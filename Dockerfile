@@ -3,7 +3,8 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json build.js nav.config.js ./
 COPY src ./src
-RUN node build.js
+ARG APP_VERSION=
+RUN APP_VERSION="$APP_VERSION" node build.js
 
 # Final stage: just nginx + the built static files, nothing else
 FROM nginx:alpine

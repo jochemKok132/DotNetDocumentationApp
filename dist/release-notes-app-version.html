@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15181d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content=".NET Docs">
+<title>Release Notes &amp; App Version · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+          <li><a href="permissions-roles.html">Permissions &amp; Role Hierarchy</a></li>
+          <li><a href="view-only-guard.html">View-Only Role Guard</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+          <li><a href="blazor-confirm-dialog.html">Awaitable Confirm Dialog</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+          <li><a href="email-confirmation.html">Email Sending &amp; Confirmation Tokens</a></li>
+          <li><a href="automation-worker.html">Periodic Automation Worker</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+          <li><a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a></li>
+          <li><a href="release-pipeline.html">Release Pipeline (Test, Images, Deploy)</a></li>
+          <li><a href="release-notes-app-version.html" class="active" aria-current="page">Release Notes &amp; App Version</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Worked Examples</summary>
+        <ul>
+          <li><a href="elo-rating-system.html">Elo Rating System</a></li>
+          <li><a href="stock-allocation.html">Stock Allocation</a></li>
+          <li><a href="shift-scheduling.html">Greedy Shift Scheduling</a></li>
+        </ul>
+      </details>
+    </div>
+    <div class="sidenav-footer">
+      <span>v1.1.0</span>
+      <button type="button" class="install-btn" id="installBtn" hidden>Install app</button>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Release Notes &amp; App Version Display</h1>
+<p class="lede">Show the running version inside the app, compare it with the latest GitHub release, and render the release notes on a page — with GitHub as the only place a release is ever written. Publishing a release is the whole "changelog" workflow; the app just reads it.</p>
+
+<h2>Step 1: stamp the version at build time</h2>
+<p>The version is never typed into code. The release workflow passes the tag as a Docker build argument, and <code>dotnet publish</code> bakes it into the assembly's informational version. A local build with no argument falls back to a recognisable dev value.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/Dockerfile (build stage)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-dockerfile">FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG VERSION=0.0.0-dev
+WORKDIR /src
+# ... restore + copy sources ...
+RUN dotnet publish MyApp.API/MyApp.API.csproj -c Release -o /app/publish \
+    --no-restore -p:Version=$VERSION</code></pre>
+</div>
+
+<h2>Step 2: read it back, one helper for every project</h2>
+<p>A small static class in the Shared project reads the version from the assembly and answers the three questions a UI needs: is this a dev build, how do I display it, and is a release newer than what's running. It deliberately compares only the numeric core, so <code>v1.2.0</code>, <code>1.2.0</code> and <code>1.2.0+abc123</code> are all the same version.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Shared/Common/AppVersion.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class AppVersion
+{
+    public const string DevVersion = "0.0.0-dev";
+
+    public static string Of(Assembly assembly)
+    {
+        string version = assembly.GetCustomAttribute&lt;AssemblyInformationalVersionAttribute&gt;()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString(3)
+            ?? DevVersion;
+
+        // strip the "+commit-sha" build metadata the SDK appends
+        int metadata = version.IndexOf('+');
+        return metadata &gt;= 0 ? version[..metadata] : version;
+    }
+
+    public static bool IsDev(string? version) =&gt;
+        string.IsNullOrWhiteSpace(version) || version.EndsWith("-dev", StringComparison.OrdinalIgnoreCase);
+
+    public static string Display(string? version) =&gt;
+        IsDev(version) ? "dev build" : $"v{version!.TrimStart('v', 'V')}";
+
+    // a dev build is never "behind" anything
+    public static bool IsNewer(string? candidate, string? current)
+    {
+        if (IsDev(current)) return false;
+
+        var candidateCore = Core(candidate);
+        var currentCore = Core(current);
+        return candidateCore is not null &amp;&amp; currentCore is not null &amp;&amp; candidateCore &gt; currentCore;
+    }
+
+    private static Version? Core(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version)) return null;
+
+        string value = version.Trim().TrimStart('v', 'V');
+        int suffix = value.IndexOfAny(['-', '+']);
+        if (suffix &gt;= 0) value = value[..suffix];
+
+        return Version.TryParse(value, out var parsed)
+            ? new Version(parsed.Major, parsed.Minor, Math.Max(parsed.Build, 0))
+            : null;
+    }
+}</code></pre>
+</div>
+
+<h2>Step 3: the API proxies GitHub's releases</h2>
+<p>The frontend never talks to GitHub: the API fetches the releases, caches them, and returns them in the usual <a href="api-response.html">ApiResponse envelope</a>. That keeps the optional access token on the server, avoids browser CORS and rate-limit problems, and means the page keeps working when GitHub is slow.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Infrastructure/Releases/GitHubReleaseService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class GitHubReleaseService(HttpClient httpClient, ReleaseCache cache, IOptions&lt;GitHubReleasesOptions&gt; options)
+    : IReleaseService
+{
+    public async Task&lt;List&lt;ReleaseDto&gt;&gt; GetReleasesAsync()
+    {
+        if (cache.TryGet(out var cached))
+            return cached;
+
+        try
+        {
+            var releases = await httpClient.GetFromJsonAsync&lt;List&lt;GitHubRelease&gt;&gt;(
+                $"repos/{options.Value.Repository}/releases?per_page=30") ?? [];
+
+            var result = releases
+                .Where(r =&gt; !r.Draft)
+                .Select(ToDto)
+                .OrderByDescending(r =&gt; r.PublishedAt)
+                .ToList();
+
+            cache.Set(result, TimeSpan.FromMinutes(options.Value.CacheMinutes));
+            return result;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException)
+        {
+            // GitHub down or rate-limited: an old answer beats an error page
+            if (cache.Stale is { } stale)
+                return stale;
+
+            throw new HttpRequestException("The releases could not be loaded from GitHub right now.", exception);
+        }
+    }
+
+    public async Task&lt;ReleaseDto?&gt; GetLatestReleaseAsync() =&gt;
+        (await GetReleasesAsync()).FirstOrDefault(r =&gt; !r.Prerelease);
+}</code></pre>
+</div>
+
+<p>The cache is the same locked-field idea as <a href="in-memory-caching.html">In-Memory Caching</a>, with one addition — expired data isn't thrown away, it's kept as <code>Stale</code> so the failure path above can still serve it:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Infrastructure/Releases/ReleaseCache.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ReleaseCache
+{
+    private readonly object _lock = new();
+    private List&lt;ReleaseDto&gt;? _releases;
+    private DateTime _expiresAt;
+
+    public bool TryGet(out List&lt;ReleaseDto&gt; releases)
+    {
+        lock (_lock)
+        {
+            if (_releases is not null &amp;&amp; DateTime.UtcNow &lt; _expiresAt)
+            {
+                releases = _releases;
+                return true;
+            }
+
+            releases = [];
+            return false;
+        }
+    }
+
+    // expired but still the best we have
+    public List&lt;ReleaseDto&gt;? Stale { get { lock (_lock) return _releases; } }
+
+    public void Set(List&lt;ReleaseDto&gt; releases, TimeSpan timeToLive)
+    {
+        lock (_lock)
+        {
+            _releases = releases;
+            _expiresAt = DateTime.UtcNow.Add(timeToLive);
+        }
+    }
+}</code></pre>
+</div>
+
+<h2>Configuration and registration</h2>
+<p>The repository to read is options-pattern configuration, validated at startup (see <a href="options-pattern.html">Strongly-Typed Configuration</a>). A token is optional — it only raises GitHub's rate limit or unlocks a private repository.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Options + registration</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class GitHubReleasesOptions
+{
+    public const string SectionName = "Releases";
+
+    [Required]
+    [RegularExpression(@"^[\w.-]+/[\w.-]+$", ErrorMessage = "Releases:Repository must look like owner/repository.")]
+    public string Repository { get; set; } = string.Empty;
+
+    public string? Token { get; set; }
+
+    [Range(1, 1440)]
+    public int CacheMinutes { get; set; } = 10;
+}
+
+services.AddOptions&lt;GitHubReleasesOptions&gt;()
+    .Bind(configuration.GetSection(GitHubReleasesOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+services.AddSingleton&lt;ReleaseCache&gt;();
+services.AddHttpClient&lt;IReleaseService, GitHubReleaseService&gt;((provider, client) =&gt;
+{
+    var options = provider.GetRequiredService&lt;IOptions&lt;GitHubReleasesOptions&gt;&gt;().Value;
+
+    client.BaseAddress = new Uri("https://api.github.com/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MyApp");          // GitHub rejects requests without one
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+
+    if (!string.IsNullOrWhiteSpace(options.Token))
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.Token);
+});</code></pre>
+</div>
+
+<h2>The endpoints</h2>
+<p>The running version is public (a login screen can show it); the release list needs a signed-in employee. A <code>503</code> distinguishes "GitHub unreachable" from a real server fault.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/Controllers/ReleasesController.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[ApiController]
+[Route("[controller]")]
+public class ReleasesController(IReleaseService releaseService) : ControllerBase
+{
+    [Authorize(Roles = Permissions.Employees)]
+    [HttpGet]
+    public async Task&lt;IActionResult&gt; GetAllAsync()
+    {
+        try
+        {
+            return Ok(ApiResponse&lt;List&lt;ReleaseDto&gt;&gt;.Ok(await releaseService.GetReleasesAsync()));
+        }
+        catch (HttpRequestException exception)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ApiResponse&lt;List&lt;ReleaseDto&gt;&gt;.Fail(exception.Message));
+        }
+    }
+
+    [AllowAnonymous]
+    [HttpGet("Version")]
+    public IActionResult GetVersion() =&gt;
+        Ok(ApiResponse&lt;string&gt;.Ok(AppVersion.Of(typeof(ReleasesController).Assembly)));
+}</code></pre>
+</div>
+
+<h2>Step 4: the page — badges and a tiny markdown renderer</h2>
+<p>The page compares the running version with the newest non-prerelease and shows <em>Update available</em>, <em>Up to date</em> or nothing for a dev build. Release notes are GitHub markdown, but the page only needs headings, bullet lists and paragraphs, so a 30-line parser that emits real Razor elements is enough — and because every line is rendered as text (never as raw HTML), a release body can't inject markup into the page.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Pages/ReleaseNotes.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">&lt;div class="version-strip"&gt;
+    &lt;span&gt;Running: @AppVersion.Display(runningVersion)&lt;/span&gt;
+
+    @if (latest is not null &amp;&amp; !AppVersion.IsDev(runningVersion))
+    {
+        @if (AppVersion.IsNewer(latest.Version, runningVersion))
+        {
+            &lt;span class="status-badge status-update"&gt;Update available&lt;/span&gt;
+        }
+        else
+        {
+            &lt;span class="status-badge status-ok"&gt;Up to date&lt;/span&gt;
+        }
+    }
+&lt;/div&gt;
+
+@foreach (var block in ParseNotes(release.Notes))
+{
+    @if (block.Kind == BlockKind.Heading)       { &lt;h4&gt;@block.Lines[0]&lt;/h4&gt; }
+    else if (block.Kind == BlockKind.List)      { &lt;ul&gt;@foreach (var line in block.Lines) { &lt;li&gt;@line&lt;/li&gt; }&lt;/ul&gt; }
+    else                                        { &lt;p&gt;@string.Join(" ", block.Lines)&lt;/p&gt; }
+}
+
+@code {
+    private readonly string runningVersion = AppVersion.Of(typeof(Program).Assembly);
+    private ReleaseDto? latest;
+
+    private enum BlockKind { Heading, List, Paragraph }
+    private record Block(BlockKind Kind, List&lt;string&gt; Lines);
+
+    private static readonly Regex LinkPattern = new(@"\[([^\]]+)\]\([^)]+\)");
+
+    // keep the link text, drop the markdown around it
+    private static string Clean(string text) =&gt;
+        LinkPattern.Replace(text, "$1").Replace("**", "").Replace("`", "").Trim();
+
+    private static List&lt;Block&gt; ParseNotes(string notes)
+    {
+        var blocks = new List&lt;Block&gt;();
+        Block? current = null;
+
+        foreach (var raw in notes.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = raw.Trim();
+
+            if (line.Length == 0) { current = null; continue; }
+
+            if (line.StartsWith('#'))
+            {
+                blocks.Add(new Block(BlockKind.Heading, [Clean(line.TrimStart('#'))]));
+                current = null;
+                continue;
+            }
+
+            if (line.StartsWith("- ") || line.StartsWith("* "))
+            {
+                if (current?.Kind != BlockKind.List)
+                {
+                    current = new Block(BlockKind.List, []);
+                    blocks.Add(current);
+                }
+                current.Lines.Add(Clean(line[2..]));
+                continue;
+            }
+
+            if (current?.Kind != BlockKind.Paragraph)
+            {
+                current = new Block(BlockKind.Paragraph, []);
+                blocks.Add(current);
+            }
+            current.Lines.Add(Clean(line));
+        }
+
+        return blocks;
+    }
+}</code></pre>
+</div>
+
+<blockquote>Need full markdown (tables, code fences, images)? Swap <code>ParseNotes</code> for a markdown library such as Markdig and render its output — but then sanitise the HTML, because the release body is text someone else can edit.</blockquote>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>The tag is the single source of truth.</strong> <a href="release-pipeline.html">Release Pipeline</a> strips the leading <code>v</code> from the tag and passes it as <code>VERSION</code>; if the tag isn't a valid version, <code>Core()</code> returns <code>null</code> and no "update available" badge is ever shown — safe, but silent.</li>
+  <li><strong>Drafts and pre-releases.</strong> Drafts are filtered out; pre-releases are listed but never counted as "latest", so a beta tag doesn't prompt every user to update.</li>
+  <li><strong>Cache duration is a trade-off.</strong> Ten minutes keeps you well inside GitHub's unauthenticated rate limit; lower it only together with a token.</li>
+  <li><strong>Sits next to the docs-site version.</strong> This is the in-app counterpart of <a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a>, which stamps the docs site's own version from <code>package.json</code>.</li>
+</ul>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

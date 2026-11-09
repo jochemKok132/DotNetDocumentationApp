@@ -1,0 +1,165 @@
+<h1>View-Only Role Guard</h1>
+<p class="lede">A demo, tester or auditor account that can open every screen but can't change anything — enforced once, in a single middleware, by HTTP method. No per-controller attribute to forget, and no risk of a new endpoint accidentally being writable.</p>
+
+<h2>Why a middleware instead of an attribute</h2>
+<p>The obvious approach is to leave write endpoints off the view-only role's <code>[Authorize(Roles = ...)]</code> list. That works until someone adds a new endpoint and lists the role "because it needs to see the page" — and a <code>POST</code> that the role should never reach is suddenly open. A guard that looks at the <em>request method</em> instead of the endpoint can't be bypassed by a new controller: if the caller is view-only and the method isn't <code>GET</code>/<code>HEAD</code>/<code>OPTIONS</code>, the request stops here.</p>
+
+<h2>The shared rules</h2>
+<p>The role name, the refusal message and the "is this method read-only" check live in the <em>Shared</em> project, so the API and every frontend agree on them without duplicating strings.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Shared/Common/AccessRules.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class AccessRules
+{
+    public const string ViewOnlyRole = nameof(EmployeeRoleDto.Tester);
+    public const string ViewOnlyMessage = "This is a view-only account. Nothing was saved.";
+
+    public static bool IsReadOnlyMethod(string method) =&gt;
+        method.Equals("GET", StringComparison.OrdinalIgnoreCase) ||
+        method.Equals("HEAD", StringComparison.OrdinalIgnoreCase) ||
+        method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase);
+}</code></pre>
+</div>
+
+<h2>The middleware</h2>
+<p>It answers with the same <a href="api-response.html">ApiResponse envelope</a> as every other failure, so the frontend's normal error handling shows the message without a special case.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/ViewOnlyGuard.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ViewOnlyGuard(RequestDelegate next)
+{
+    public async Task InvokeAsync(HttpContext context)
+    {
+        if (context.User.IsInRole(AccessRules.ViewOnlyRole) &amp;&amp;
+            !AccessRules.IsReadOnlyMethod(context.Request.Method) &amp;&amp;
+            !IsLogin(context.Request.Path))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(ApiResponse&lt;object&gt;.Fail(AccessRules.ViewOnlyMessage));
+            return;
+        }
+
+        await next(context);
+    }
+
+    // logging in is a POST, and a view-only user still has to be able to do it
+    private static bool IsLogin(PathString path) =&gt;
+        path.Value?.EndsWith("/Login", StringComparison.OrdinalIgnoreCase) ?? false;
+}</code></pre>
+</div>
+
+<h2>Pipeline position matters</h2>
+<p><code>context.User</code> is only populated after authentication has run, and the guard should reject before authorization spends any time evaluating policies, so it sits between the two:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/Program.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">app.UseAuthentication();
+app.UseMiddleware&lt;ViewOnlyGuard&gt;();   // after authentication (needs the user), before authorization
+app.UseAuthorization();</code></pre>
+</div>
+
+<h2>Mirror it in the UI so the buttons aren't a surprise</h2>
+<p>The server is the real enforcement, but a view-only user shouldn't be able to fill in a form and only then be told no. Frontends read the same constants and disable the action up front, with the shared message as the tooltip:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Pages/Orders.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">&lt;button class="btn-save"
+        disabled="@(busy || viewOnly)"
+        title="@(viewOnly ? AccessRules.ViewOnlyMessage : null)"
+        @onclick="CreateAsync"&gt;Create order&lt;/button&gt;
+
+@code {
+    private bool viewOnly;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        viewOnly = authState.User.IsInRole(AccessRules.ViewOnlyRole);
+    }
+}</code></pre>
+</div>
+
+<h2>Testing it without a server</h2>
+<p>A middleware is just a class taking a <code>RequestDelegate</code>, so it needs no test host: pass a delegate that records whether it was reached, build a <code>DefaultHttpContext</code> with the claims and method you want, and assert on the status code and the flag.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>UnitTests/Api/ViewOnlyGuardTests.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class ViewOnlyGuardTests
+{
+    private static (ViewOnlyGuard guard, Func&lt;bool&gt; nextCalled) CreateSut()
+    {
+        bool called = false;
+        var guard = new ViewOnlyGuard(_ =&gt; { called = true; return Task.CompletedTask; });
+        return (guard, () =&gt; called);
+    }
+
+    private static DefaultHttpContext Request(string method, string path, string? role)
+    {
+        var claims = role is null ? Array.Empty&lt;Claim&gt;() : [new Claim(ClaimTypes.Role, role)];
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test")) };
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.Response.Body = new MemoryStream();
+        return context;
+    }
+
+    [Theory]
+    [InlineData("POST", "/Product/Create")]
+    [InlineData("PUT", "/Product/Update")]
+    [InlineData("DELETE", "/Product/SoftDelete/1")]
+    public async Task InvokeAsync_ViewOnlyChanges_Returns403AndSkipsEndpoint(string method, string path)
+    {
+        var (sut, nextCalled) = CreateSut();
+        var context = Request(method, path, AccessRules.ViewOnlyRole);
+
+        await sut.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.False(nextCalled());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ViewOnlyLogsIn_CallsEndpoint()
+    {
+        var (sut, nextCalled) = CreateSut();
+        var context = Request("POST", "/Employee/Login", AccessRules.ViewOnlyRole);
+
+        await sut.InvokeAsync(context);
+
+        Assert.True(nextCalled());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ManagerChanges_CallsEndpoint()
+    {
+        var (sut, nextCalled) = CreateSut();
+        var context = Request("POST", "/Product/Create", "Manager");
+
+        await sut.InvokeAsync(context);
+
+        Assert.True(nextCalled());
+    }
+}</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>It's a blunt instrument on purpose.</strong> Any non-<code>GET</code> is refused, including harmless ones like a search that was built as a <code>POST</code> with a filter body. Keep reads on <code>GET</code> (see <a href="pagination-pattern.html">Generic Pagination Pattern</a>) or add an explicit allow-list like the login path.</li>
+  <li><strong>Pair it with the role list.</strong> The view-only role still needs to appear in the roles of every <em>read</em> endpoint it should see — see <a href="permissions-roles.html">Permissions &amp; Role Hierarchy</a> for how that's kept in one place.</li>
+  <li><strong>Test every branch.</strong> Refused writes, allowed reads, the login exception and a normal role passing straight through are four different paths — the tests above cover each. For the broader testing approach see <a href="unit-testing-moq.html">Unit Testing with Moq</a>.</li>
+</ul>

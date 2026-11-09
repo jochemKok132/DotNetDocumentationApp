@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15181d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content=".NET Docs">
+<title>Greedy Shift Scheduling · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+          <li><a href="permissions-roles.html">Permissions &amp; Role Hierarchy</a></li>
+          <li><a href="view-only-guard.html">View-Only Role Guard</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+          <li><a href="blazor-confirm-dialog.html">Awaitable Confirm Dialog</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+          <li><a href="email-confirmation.html">Email Sending &amp; Confirmation Tokens</a></li>
+          <li><a href="automation-worker.html">Periodic Automation Worker</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+          <li><a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a></li>
+          <li><a href="release-pipeline.html">Release Pipeline (Test, Images, Deploy)</a></li>
+          <li><a href="release-notes-app-version.html">Release Notes &amp; App Version</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Worked Examples</summary>
+        <ul>
+          <li><a href="elo-rating-system.html">Elo Rating System</a></li>
+          <li><a href="stock-allocation.html">Stock Allocation</a></li>
+          <li><a href="shift-scheduling.html" class="active" aria-current="page">Greedy Shift Scheduling</a></li>
+        </ul>
+      </details>
+    </div>
+    <div class="sidenav-footer">
+      <span>v1.1.0</span>
+      <button type="button" class="install-btn" id="installBtn" hidden>Install app</button>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Greedy Shift Scheduling (Worked Example)</h1>
+<p class="lede">Turn "we need two cashiers every weekday morning" into a week of concrete shifts: each slot is given to the qualified, available employee with the most contract hours still unplanned, and slots nobody can fill are left open for a human. A static function with no database access — so the rules are a handful of unit tests.</p>
+
+<h2>The inputs</h2>
+<p>Three plain collections go in; a list of shifts comes out. Nothing is read from or written to a database inside the generator.</p>
+<ul>
+  <li><strong>Shift templates</strong> — name, which weekdays, start and end time, required role and how many staff.</li>
+  <li><strong>Staff</strong> — role, contract hours per week and (optionally) the days and time windows they can work.</li>
+  <li><strong>Days off</strong> — approved leave as a set of <code>(employeeId, date)</code> pairs.</li>
+</ul>
+
+<h2>Weekdays as a flags enum</h2>
+<p>A template says "Monday to Friday" with one value instead of five rows. The enum is a <code>[Flags]</code> bit set, and one helper maps .NET's <code>DayOfWeek</code> (Sunday = 0) onto it with Monday first:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Domain/Enums/WeekDays.cs + the mapper</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[Flags]
+public enum WeekDays
+{
+    None      = 0,
+    Monday    = 1,
+    Tuesday   = 2,
+    Wednesday = 4,
+    Thursday  = 8,
+    Friday    = 16,
+    Saturday  = 32,
+    Sunday    = 64,
+}
+
+// "Monday to Friday" is one value:  WeekDays.Monday | WeekDays.Tuesday | ... | WeekDays.Friday
+// and "does this template run today?" is one call:  template.Days.HasFlag(weekDay)
+
+// DayOfWeek: Sunday = 0 ... Saturday = 6.   (day + 6) % 7 shifts it so Monday = 0.
+public static WeekDays ToWeekDay(DayOfWeek day) =&gt; (WeekDays)(1 &lt;&lt; (((int)day + 6) % 7));</code></pre>
+</div>
+
+<h2>The generator</h2>
+<p>For each day of the week, for each template that runs that day, for each required slot, pick one employee. The selection is a filter followed by a deterministic ordering — no randomness, so the same inputs always give the same roster and the tests can assert exact results.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/Scheduling/ScheduleGenerator.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class ScheduleGenerator
+{
+    public static bool IsAvailable(Employee employee, DateOnly date, TimeOnly start, TimeOnly end) =&gt;
+        // no availability entered at all means "any time"
+        employee.Availability.Count == 0 ||
+        employee.Availability.Any(a =&gt; a.Day == date.DayOfWeek &amp;&amp; ScheduleRules.Covers(a.AvailableFrom, a.AvailableUntil, start, end));
+
+    public static List&lt;ScheduledShift&gt; Generate(
+        DateOnly weekStart,
+        IEnumerable&lt;ShiftTemplate&gt; templates,
+        IEnumerable&lt;Employee&gt; staff,
+        ISet&lt;(Guid EmployeeId, DateOnly Date)&gt; daysOff)
+    {
+        var employees = staff.Where(e =&gt; e.ContractHours &gt; 0).ToList();
+        var planned = employees.ToDictionary(e =&gt; e.Id, _ =&gt; 0m);          // hours given out so far this week
+        var workingDays = new HashSet&lt;(Guid, DateOnly)&gt;();                 // one shift per person per day
+        var shifts = new List&lt;ScheduledShift&gt;();
+
+        var ordered = templates
+            .Where(t =&gt; t.RequiredStaff &gt; 0 &amp;&amp; t.StartTime &lt; t.EndTime)   // ignore broken templates
+            .OrderBy(t =&gt; t.StartTime).ThenBy(t =&gt; t.Role).ThenBy(t =&gt; t.Name)
+            .ToList();
+
+        for (int offset = 0; offset &lt; 7; offset++)
+        {
+            var date = weekStart.AddDays(offset);
+            var weekDay = ToWeekDay(date.DayOfWeek);
+
+            foreach (var template in ordered.Where(t =&gt; t.Days.HasFlag(weekDay)))
+            {
+                decimal hours = ScheduleRules.Hours(template.StartTime, template.EndTime);
+
+                for (int slot = 0; slot &lt; template.RequiredStaff; slot++)
+                {
+                    var employee = employees
+                        .Where(e =&gt; e.Role == template.Role
+                            &amp;&amp; !workingDays.Contains((e.Id, date))
+                            &amp;&amp; !daysOff.Contains((e.Id, date))
+                            &amp;&amp; planned[e.Id] + hours &lt;= e.ContractHours
+                            &amp;&amp; IsAvailable(e, date, template.StartTime, template.EndTime))
+                        .OrderByDescending(e =&gt; e.ContractHours - planned[e.Id])   // most hours left first
+                        .ThenBy(e =&gt; shifts.Count(s =&gt; s.EmployeeId == e.Id))    // then fewest shifts so far
+                        .ThenBy(e =&gt; e.EmployeeId, StringComparer.Ordinal)         // then a stable tie-break
+                        .FirstOrDefault();
+
+                    if (employee is not null)
+                    {
+                        planned[employee.Id] += hours;
+                        workingDays.Add((employee.Id, date));
+                    }
+
+                    // an unfillable slot is still created, just with no employee
+                    shifts.Add(new ScheduledShift
+                    {
+                        Id = Guid.NewGuid(),
+                        Date = date,
+                        StartTime = template.StartTime,
+                        EndTime = template.EndTime,
+                        Role = template.Role,
+                        EmployeeId = employee?.Id,
+                    });
+                }
+            }
+        }
+
+        return shifts;
+    }
+}</code></pre>
+</div>
+
+<p>Reading the <code>.Where</code> chain top to bottom gives the whole rule set: right role, not already working that day, not on leave, still within contract hours, and inside their availability window. The ordering spreads work evenly — whoever has the most hours left goes first — which is what stops the first person alphabetically from getting every shift.</p>
+
+<h2>Leaving gaps instead of failing</h2>
+<p>When nobody qualifies, the slot is still created with <code>EmployeeId = null</code>. A greedy algorithm can't always find a complete roster, and a half-filled week the manager can finish by hand is more useful than an exception. The UI shows open shifts, and the manager decides whether to hire cover or move someone.</p>
+
+<h2>Generating ahead on a timer</h2>
+<p>A small rules class decides which weeks to produce (<code>WeekStart</code> snaps any date back to its Monday; <code>UpcomingWeeks</code> yields the next four), and the <a href="automation-worker.html">automation worker</a> calls the service each tick, which only creates weeks that don't exist yet — so a manager's manual edits to an already-generated week are never overwritten.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Shared/Common/ScheduleRules.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class ScheduleRules
+{
+    public const int WeeksAhead = 4;
+
+    // back up to Monday: (day + 6) % 7 is "days since Monday"
+    public static DateOnly WeekStart(DateOnly date) =&gt;
+        date.AddDays(-(((int)date.DayOfWeek + 6) % 7));
+
+    public static IEnumerable&lt;DateOnly&gt; UpcomingWeeks(DateOnly today)
+    {
+        var current = WeekStart(today);
+        for (int week = 1; week &lt;= WeeksAhead; week++)
+            yield return current.AddDays(7 * week);
+    }
+
+    public static decimal Hours(TimeOnly start, TimeOnly end) =&gt;
+        Math.Round((decimal)(end - start).TotalHours, 2);
+
+    public static bool Covers(TimeOnly availableFrom, TimeOnly availableUntil, TimeOnly start, TimeOnly end) =&gt;
+        availableFrom &lt;= start &amp;&amp; availableUntil &gt;= end;
+}</code></pre>
+</div>
+
+<h2>Testing it</h2>
+<p>Helpers build employees and templates with one line each, so every rule above is a short test with an exact expected roster:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>UnitTests/Services/Scheduling/ScheduleGeneratorTests.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">private static readonly DateOnly Monday = new(2026, 11, 2);
+
+private static Employee Staff(string number, EmployeeRole role, int hours, params (DayOfWeek Day, int From, int Until)[] availability)
+{
+    var employee = new Employee { Id = Guid.NewGuid(), EmployeeId = number, Role = role, ContractHours = hours };
+    foreach (var (day, from, until) in availability)
+        employee.Availability.Add(new EmployeeAvailability
+        {
+            Id = Guid.NewGuid(), EmployeeId = employee.Id, Day = day,
+            AvailableFrom = new TimeOnly(from, 0), AvailableUntil = new TimeOnly(until, 0)
+        });
+    return employee;
+}
+
+private static ShiftTemplate Template(WeekDays days, int start, int end, EmployeeRole role = EmployeeRole.Cashier, int required = 1) =&gt; new()
+{
+    Id = Guid.NewGuid(),
+    Name = "Shift",
+    Days = days,
+    StartTime = new TimeOnly(start, 0),
+    EndTime = new TimeOnly(end, 0),
+    Role = role,
+    RequiredStaff = required,
+};
+
+[Fact]
+public void Generate_OnlyAssignsEmployeesWithTheRole()
+{
+    var floor = Staff("000013", EmployeeRole.FloorWorker, 40);
+    var cashier = Staff("000010", EmployeeRole.Cashier, 40);
+
+    var result = ScheduleGenerator.Generate(Monday, [Template(WeekDays.Monday, 8, 14)], [floor, cashier], new HashSet&lt;(Guid, DateOnly)&gt;());
+
+    Assert.Equal(cashier.Id, Assert.Single(result).EmployeeId);
+}
+
+[Fact]
+public void Generate_NeverMoreThanContractHours()
+{
+    var cashier = Staff("000010", EmployeeRole.Cashier, 12);
+    var days = WeekDays.Monday | WeekDays.Tuesday | WeekDays.Wednesday;
+
+    var result = ScheduleGenerator.Generate(Monday, [Template(days, 8, 14)], [cashier], new HashSet&lt;(Guid, DateOnly)&gt;());
+
+    Assert.Equal(2, result.Count(s =&gt; s.EmployeeId == cashier.Id));   // 2 x 6h = 12h
+    Assert.Single(result, s =&gt; s.EmployeeId is null);                 // the third day stays open
+}
+
+[Fact]
+public void Generate_OneShiftPerEmployeePerDay()
+{
+    var cashier = Staff("000010", EmployeeRole.Cashier, 40);
+
+    var result = ScheduleGenerator.Generate(Monday,
+        [Template(WeekDays.Monday, 8, 12), Template(WeekDays.Monday, 13, 17)], [cashier], new HashSet&lt;(Guid, DateOnly)&gt;());
+
+    Assert.Single(result, s =&gt; s.EmployeeId == cashier.Id);
+}</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>Greedy, not optimal.</strong> It never backtracks, so a different order of templates can leave a slot open that a smarter search would have filled. That's an accepted trade for a result that is fast, explainable and reproducible.</li>
+  <li><strong>Sort order is part of the behaviour.</strong> Earlier shifts and the role order are filled first; change the <code>OrderBy</code> chain and you change who gets scarce staff.</li>
+  <li><strong>Overnight shifts need two templates.</strong> Templates with <code>StartTime &gt;= EndTime</code> are skipped, so a shift that crosses midnight has to be split at midnight — a <code>TimeOnly</code> pair can't say "ends tomorrow".</li>
+  <li><strong>Hours come from the template, not the clock.</strong> <code>ContractHours</code> is a weekly cap compared against hours already planned in <em>this generation</em>; leave and sick days are handled via the <code>daysOff</code> set, not by lowering the cap.</li>
+</ul>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

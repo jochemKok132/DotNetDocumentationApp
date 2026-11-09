@@ -45,4 +45,35 @@
       });
     });
   });
+
+  // PWA: register the service worker (needs https, or localhost for previews)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {
+        /* offline support is a bonus; the site works without it */
+      });
+    });
+  }
+
+  // PWA: show our own "Install app" button when the browser says the site is installable
+  var installBtn = document.getElementById('installBtn');
+  var installEvent = null;
+  window.addEventListener('beforeinstallprompt', function (event) {
+    event.preventDefault();
+    installEvent = event;
+    if (installBtn) installBtn.hidden = false;
+  });
+  if (installBtn) {
+    installBtn.addEventListener('click', function () {
+      if (!installEvent) return;
+      installEvent.prompt();
+      installEvent.userChoice.finally(function () {
+        installEvent = null;
+        installBtn.hidden = true;
+      });
+    });
+  }
+  window.addEventListener('appinstalled', function () {
+    if (installBtn) installBtn.hidden = true;
+  });
 })();

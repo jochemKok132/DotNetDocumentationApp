@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15181d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content=".NET Docs">
 <title>Repository Pattern · Docs</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,6 +42,8 @@
           <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
           <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
           <li><a href="webhooks.html">Webhooks</a></li>
+          <li><a href="permissions-roles.html">Permissions &amp; Role Hierarchy</a></li>
+          <li><a href="view-only-guard.html">View-Only Role Guard</a></li>
         </ul>
       </details>
       <details class="nav-section">
@@ -44,6 +53,7 @@
           <li><a href="http-service.html">HTTP Service Wrapper</a></li>
           <li><a href="toast-notifications.html">Toast Notification Service</a></li>
           <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+          <li><a href="blazor-confirm-dialog.html">Awaitable Confirm Dialog</a></li>
         </ul>
       </details>
       <details class="nav-section">
@@ -66,6 +76,7 @@
           <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
           <li><a href="background-jobs.html">Background Jobs</a></li>
           <li><a href="email-confirmation.html">Email Sending &amp; Confirmation Tokens</a></li>
+          <li><a href="automation-worker.html">Periodic Automation Worker</a></li>
         </ul>
       </details>
       <details class="nav-section">
@@ -84,6 +95,8 @@
           <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
           <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
           <li><a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a></li>
+          <li><a href="release-pipeline.html">Release Pipeline (Test, Images, Deploy)</a></li>
+          <li><a href="release-notes-app-version.html">Release Notes &amp; App Version</a></li>
         </ul>
       </details>
       <details class="nav-section">
@@ -103,10 +116,15 @@
         <summary>Worked Examples</summary>
         <ul>
           <li><a href="elo-rating-system.html">Elo Rating System</a></li>
+          <li><a href="stock-allocation.html">Stock Allocation</a></li>
+          <li><a href="shift-scheduling.html">Greedy Shift Scheduling</a></li>
         </ul>
       </details>
     </div>
-    <div class="sidenav-footer">v1.1.0</div>
+    <div class="sidenav-footer">
+      <span>v1.1.0</span>
+      <button type="button" class="install-btn" id="installBtn" hidden>Install app</button>
+    </div>
   </nav>
 
   <div class="sidenav-backdrop" id="sidenavBackdrop"></div>

@@ -1,0 +1,241 @@
+<h1>Release Pipeline: Test Gate, Matrix Images &amp; Deploy</h1>
+<p class="lede">One published GitHub Release runs the tests, builds every Docker image in parallel with the version baked in, attaches a self-contained desktop build to the release, and — optionally — tells the server to update. Nothing ships unless the tests pass, and nothing happens on a normal push.</p>
+
+<h2>The shape: one gate, three parallel jobs, one optional deploy</h2>
+<p>Everything hangs off <code>release: published</code>, so a release is a deliberate, tagged act (not "whatever is on main"). The first job is a gate; the image build and the desktop build both <code>need</code> it, so a failing test stops both. The deploy waits for the other two.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>job graph</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-text">release published
+      |
+  build-test  (restore, build, unit tests)
+      |-------------------------.
+   docker (matrix: api, web)   cash-register (windows exe)
+      |                         |
+      '-----------.-------------'
+                  |
+               deploy  (only if enabled, and not a pre-release)</code></pre>
+</div>
+
+<h2>Step 1: the test gate</h2>
+<p>Building in <code>Release</code> and then testing with <code>--no-build</code> reuses the compiled output instead of compiling twice.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>.github/workflows/release.yml (1/4)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write     # attach files to the release
+  packages: write     # push to the GitHub Container Registry
+
+env:
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - run: dotnet restore
+      - run: dotnet build --no-restore --configuration Release
+      - run: dotnet test --no-build --configuration Release --verbosity normal</code></pre>
+</div>
+
+<h2>Step 2: one job definition, one image per matrix entry</h2>
+<p>An API and a web frontend need the same steps with a different Dockerfile and image name. A <code>strategy.matrix</code> runs the single job definition once per entry, in parallel, instead of copy-pasting it.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>.github/workflows/release.yml (2/4)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">  docker:
+    name: Docker image (${{ matrix.image }})
+    needs: build-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: myapp-api
+            dockerfile: MyApp.API/Dockerfile
+          - image: myapp-web
+            dockerfile: MyApp.ManagementApp/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      # tag "v1.4.0" becomes the build argument "1.4.0"
+      - name: Version from release tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" &gt;&gt; "$GITHUB_ENV"
+
+      # registry paths must be lowercase, GitHub owner names might not be
+      - name: Lowercase owner for ghcr.io
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" &gt;&gt; "$GITHUB_ENV"
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.OWNER }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}</code></pre>
+</div>
+
+<p>What the tag rules produce for a release <code>v1.4.2</code>:</p>
+<ul>
+  <li><code>:1.4.2</code> — the exact version, always available to roll back to or pin.</li>
+  <li><code>:1.4</code> — a moving "latest patch of 1.4" tag.</li>
+  <li><code>:latest</code> — only for <em>non</em>-pre-releases (<code>enable=...</code>), so publishing a beta never moves what a server tracking <code>latest</code> runs.</li>
+</ul>
+<p>The <code>VERSION</code> build argument is what <a href="release-notes-app-version.html">Release Notes &amp; App Version Display</a> reads back out of the assembly, so the version shown in the app is the tag you published. The two <code>scope</code> values keep each image's layer cache separate so the matrix jobs don't evict each other's.</p>
+
+<h2>Step 3: attach a desktop build to the release</h2>
+<p>A WinForms or other client can ride the same release: build a single-file, self-contained executable on a Windows runner, zip it, and upload it to the release that triggered the run. Users get a download link next to the release notes, with no installer.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>.github/workflows/release.yml (3/4)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">  cash-register:
+    name: Desktop client download
+    needs: build-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish single-file exe
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          dotnet publish MyApp.Client/MyApp.Client.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version=$version -o publish/client
+
+      # bake the server address into the download, if one is configured
+      - name: Point the client at the server
+        if: ${{ vars.CLIENT_API_URL != '' }}
+        shell: pwsh
+        run: |
+          @{ ApiBaseUrl = "${{ vars.CLIENT_API_URL }}" } | ConvertTo-Json | Set-Content publish/client/appsettings.json
+
+      - name: Zip and attach to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $zip = "MyApp.Client-${{ github.ref_name }}-win-x64.zip"
+          Compress-Archive -Path publish/client/* -DestinationPath $zip
+          gh release upload "${{ github.ref_name }}" $zip --clobber</code></pre>
+</div>
+
+<p><code>vars.*</code> are repository <em>variables</em> (plain settings, not secrets), which is why they can be tested in an <code>if:</code>. The release-notes page finds this asset by its file-name prefix and shows a download button — which is why the zip name starts with a fixed prefix.</p>
+
+<h2>Step 4: an optional deploy, off unless you switch it on</h2>
+<p>The deploy job is guarded by a repository variable and skipped for pre-releases. With the variable unset the pipeline simply builds and publishes — handy before a server exists, or on a fork.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>.github/workflows/release.yml (4/4)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">  deploy:
+    name: Deploy to server
+    needs: [docker, cash-register]
+    if: ${{ vars.DEPLOY_ENABLED == 'true' &amp;&amp; !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            cd /opt/myapp
+            docker compose pull
+            docker compose up -d
+            docker image prune -f</code></pre>
+</div>
+
+<p>On the server, the compose file pins nothing: it reads the version from an environment variable that defaults to <code>latest</code>, so the same file does "follow the newest release" and "stay on 1.4.2 for now":</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>deploy/docker-compose.yml</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-yaml">services:
+  api:
+    image: ghcr.io/${GHCR_OWNER}/myapp-api:${APP_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      JWT__Key: ${JWT_KEY:?Set JWT_KEY in .env}     # refuses to start without a secret
+      Releases__Repository: ${RELEASES_REPOSITORY}
+    ports:
+      - "127.0.0.1:5080:8080"                       # loopback only; nginx is the public face
+    volumes:
+      - app-data:/app/data
+
+  web:
+    image: ghcr.io/${GHCR_OWNER}/myapp-web:${APP_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5081:80"
+    depends_on:
+      - api
+
+volumes:
+  app-data:</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>This deploy step needs an inbound SSH path.</strong> If the server is a home machine behind a router with no port forwarding, GitHub's runners can't reach it. Skip the job and use the pull-based approach from <a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a> instead — the image-building half of this pipeline is identical.</li>
+  <li><strong>Compose recreates, restart doesn't.</strong> <code>docker compose pull</code> followed by <code>up -d</code> recreates containers whose image changed; a bare <code>docker restart</code> keeps running the old image.</li>
+  <li><strong>Secrets vs variables.</strong> Host, user and key are secrets; the on/off switch and the client's server URL are variables, so they can be read in <code>if:</code> conditions and edited without touching a secret.</li>
+  <li><strong>Separate CI for pull requests.</strong> This file only handles releases; the build-and-test-on-every-PR workflow in <a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a> is a separate file, and the two share the same three test commands on purpose.</li>
+  <li><strong>Pre-releases are safe to publish.</strong> They build and push versioned images and a download, but never move <code>:latest</code> and never trigger the deploy.</li>
+</ul>

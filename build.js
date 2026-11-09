@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const ROOT = __dirname;
 const SRC = path.join(ROOT, 'src');
@@ -16,7 +17,7 @@ const nav = require('./nav.config.js');
 // and the "Versioned Releases & Auto-Deploy" page) tags a commit, publishes a
 // GitHub Release from it, and only then does this build run — so the number
 // stamped into the footer always matches a real, published release.
-const VERSION = require('./package.json').version;
+const VERSION = (process.env.APP_VERSION || '').trim().replace(/^v/, '') || require('./package.json').version;
 
 function clean(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
@@ -60,6 +61,38 @@ ${items}
     .join('\n');
 }
 
+// PWA: manifest + icons are copied as-is; the service worker is generated so it
+// knows every page and asset (offline support) and gets a cache name that changes
+// whenever any of those files change (so installed copies update themselves).
+function buildPwa(slugs) {
+  copyDir(path.join(SRC, 'pwa', 'icons'), path.join(DIST, 'icons'));
+  fs.copyFileSync(path.join(SRC, 'pwa', 'manifest.webmanifest'), path.join(DIST, 'manifest.webmanifest'));
+
+  const listFiles = (dir, prefix) =>
+    fs.readdirSync(path.join(DIST, dir)).sort().map((name) => `${prefix}${name}`);
+
+  const precache = [
+    './',
+    ...slugs.map((slug) => `${slug}.html`),
+    ...listFiles('assets', 'assets/'),
+    ...listFiles('icons', 'icons/'),
+    'manifest.webmanifest',
+  ];
+
+  const hash = crypto.createHash('sha1');
+  for (const file of precache) {
+    const real = path.join(DIST, file === './' ? 'index.html' : file);
+    hash.update(file).update(fs.readFileSync(real));
+  }
+  const cacheName = `docs-${VERSION}-${hash.digest('hex').slice(0, 8)}`;
+
+  const worker = fs
+    .readFileSync(path.join(SRC, 'pwa', 'sw.js'), 'utf8')
+    .replace('__CACHE_NAME__', cacheName)
+    .replace('__PRECACHE__', JSON.stringify(precache, null, 2));
+  fs.writeFileSync(path.join(DIST, 'sw.js'), worker);
+}
+
 function build() {
   clean(DIST);
 
@@ -69,6 +102,7 @@ function build() {
   copyDir(path.join(SRC, 'styles'), path.join(DIST, 'assets'));
   copyDir(path.join(SRC, 'scripts'), path.join(DIST, 'assets'));
 
+  const slugs = [];
   let pageCount = 0;
   for (const section of nav) {
     for (const item of section.items) {
@@ -88,8 +122,13 @@ function build() {
 
       fs.writeFileSync(path.join(DIST, `${item.slug}.html`), html);
       pageCount += 1;
+      slugs.push(item.slug);
     }
   }
+
+  fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify({ version: VERSION }) + '\n');
+
+  buildPwa(slugs);
 
   console.log(`[build] wrote ${pageCount} page(s) to ${path.relative(ROOT, DIST)}/`);
 }

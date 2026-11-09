@@ -1,0 +1,136 @@
+<h1>Permissions &amp; Role Hierarchy</h1>
+<p class="lede">Every role list used in <code>[Authorize(Roles = ...)]</code> lives once, as a named constant in the Shared project. Controllers, Blazor pages and the nav all reference the same constant, so "who can approve a refund" is answered in exactly one place — and a second small class decides who may hand out which role.</p>
+
+<h2>Named permission constants</h2>
+<p><code>Authorize(Roles = "...")</code> takes a comma-separated string, so a permission is simply a constant holding that string. Naming it by <em>what it allows</em> (not who it's for) means a role change is a one-line edit instead of a search through every controller.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Shared/Common/Permissions.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class Permissions
+{
+    public const string Employees      = "Admin,Manager,Support,ShiftLeader,Cashier,FloorWorker,Tester";
+    public const string ManageStock    = "Manager,Admin";
+    public const string ViewOrders     = "Admin,Manager,ShiftLeader,Cashier,FloorWorker,Tester";
+    public const string ManageOrders   = "ShiftLeader,Manager,Admin";
+
+    // a permission can be built from another one when they should always match
+    public const string ReceiveOrders  = WriteOffStock;
+    public const string WriteOffStock  = "Admin,Manager,ShiftLeader,Cashier,FloorWorker";
+
+    // the same check, usable on a ClaimsPrincipal in code
+    public static bool Allows(this ClaimsPrincipal user, string roles) =&gt;
+        roles.Split(',').Any(user.IsInRole);
+
+    // "can open the screen": either allowed to manage, or the view-only role
+    // that sees everything but can't change it (see View-Only Role Guard)
+    public static bool CanOpen(this ClaimsPrincipal user, string manageRoles) =&gt;
+        user.Allows(manageRoles) || user.IsInRole(AccessRules.ViewOnlyRole);
+}</code></pre>
+</div>
+
+<h2>Using it on the API side</h2>
+<p>Attributes only accept compile-time constants — which is exactly what <code>const string</code> is — so nothing about the controller changes except that the roles are no longer typed out:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/Controllers/OrderController.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">[Authorize(Roles = Permissions.ViewOrders)]
+[HttpGet]
+public async Task&lt;IActionResult&gt; GetAllAsync() { ... }
+
+[Authorize(Roles = Permissions.ManageOrders)]
+[HttpPost]
+public async Task&lt;IActionResult&gt; CreateAsync(CreateOrderRequest request) { ... }</code></pre>
+</div>
+
+<h2>Using it on the frontend</h2>
+<p>The same constants drive what the UI offers, so the buttons a user sees and the endpoints the API accepts can't drift apart:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Pages/Orders.razor</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-razor">@code {
+    private bool canManage;
+    private bool canReceive;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+
+        // CanOpen: managers can use it, the view-only role can see it (disabled)
+        canManage  = authState.User.CanOpen(Permissions.ManageOrders);
+        canReceive = authState.User.CanOpen(Permissions.ReceiveOrders);
+    }
+}</code></pre>
+</div>
+
+<h2>A role hierarchy for "who can assign what"</h2>
+<p>Permissions answer "what may this role do". A separate question — "which roles may <em>this</em> user create or edit" — needs an ordering. One array defines it; position is rank, and everything else is derived from that:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Shared/Common/RoleHierarchy.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static class RoleHierarchy
+{
+    public const string OnlyLowerRoles = "You can only give out roles below your own.";
+
+    // highest first — index is the rank
+    private static readonly EmployeeRoleDto[] Order =
+    [
+        EmployeeRoleDto.Admin,
+        EmployeeRoleDto.Tester,
+        EmployeeRoleDto.Manager,
+        EmployeeRoleDto.Support,
+        EmployeeRoleDto.ShiftLeader,
+        EmployeeRoleDto.Cashier,
+        EmployeeRoleDto.FloorWorker,
+    ];
+
+    // only these roles may manage other employees at all
+    private static readonly EmployeeRoleDto[] Managers = [EmployeeRoleDto.Admin, EmployeeRoleDto.Manager];
+
+    public static int Rank(EmployeeRoleDto role)
+    {
+        int index = Array.IndexOf(Order, role);
+        return index &lt; 0 ? int.MaxValue : index;   // unknown role = lowest possible
+    }
+
+    public static bool IsBelow(EmployeeRoleDto actor, EmployeeRoleDto target) =&gt;
+        Rank(actor) &lt; Rank(target) &amp;&amp; target != EmployeeRoleDto.None;
+
+    // can manage employees at all AND the target is strictly lower than the actor
+    public static bool CanManage(EmployeeRoleDto actor, EmployeeRoleDto target) =&gt;
+        Managers.Contains(actor) &amp;&amp; IsBelow(actor, target);
+
+    // feeds the role dropdown in the "add employee" form
+    public static IEnumerable&lt;EmployeeRoleDto&gt; AssignableRoles(EmployeeRoleDto actor) =&gt;
+        Order.Where(role =&gt; CanManage(actor, role));
+
+    // roles that shouldn't even show up in lists for non-admins
+    public static IReadOnlyList&lt;EmployeeRoleDto&gt; HiddenFrom(EmployeeRoleDto viewer) =&gt;
+        viewer == EmployeeRoleDto.Admin ? [] : [EmployeeRoleDto.Admin, EmployeeRoleDto.Tester];
+
+    // the role a signed-in user actually holds
+    public static EmployeeRoleDto EmployeeRole(this ClaimsPrincipal user) =&gt;
+        Order.FirstOrDefault(role =&gt; user.IsInRole(role.ToString()), EmployeeRoleDto.None);
+}</code></pre>
+</div>
+
+<p>The service layer enforces it too — the dropdown is a convenience, not security. Creating or editing an employee checks <code>CanManage(actor, newRole)</code> and, when editing, <code>CanManage(actor, existingRole)</code>, and throws if either fails, so a hand-crafted request can't promote someone above the caller.</p>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>Constants only.</strong> <code>Roles = Permissions.X</code> must be a <code>const</code>; a <code>static readonly</code> field won't compile in an attribute. That's the reason these are strings, not arrays.</li>
+  <li><strong>Role names are claim values.</strong> They must match what <a href="jwt-auth.html">JWT Authentication</a> puts in the role claim — <code>role.ToString()</code> on the enum keeps the two in step.</li>
+  <li><strong>Unknown means lowest.</strong> <code>Rank</code> returns <code>int.MaxValue</code> for anything not in the array, so a role someone forgets to add can never outrank a real one.</li>
+  <li><strong>Pair with the guard.</strong> <a href="view-only-guard.html">View-Only Role Guard</a> covers the role that is listed on every read permission above but on no write one.</li>
+</ul>

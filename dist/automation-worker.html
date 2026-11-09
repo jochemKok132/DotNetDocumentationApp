@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15181d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content=".NET Docs">
+<title>Periodic Automation Worker · Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/base16/tomorrow-night.min.css">
+<link rel="stylesheet" href="assets/main.css">
+</head>
+<body>
+<button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+  <span></span><span></span><span></span>
+</button>
+
+<div class="shell">
+  <nav class="sidenav" id="sidenav">
+    <a class="sidenav-brand" href="index.html">Docs</a>
+    <div class="sidenav-scroll">
+      <details class="nav-section">
+        <summary>Backend Architecture</summary>
+        <ul>
+          <li><a href="index.html">Layered Architecture &amp; DI</a></li>
+          <li><a href="repository-pattern.html">Repository Pattern</a></li>
+          <li><a href="options-pattern.html">Strongly-Typed Configuration</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>API Layer</summary>
+        <ul>
+          <li><a href="api-response.html">ApiResponse &amp; Controllers</a></li>
+          <li><a href="jwt-auth.html">JWT Authentication</a></li>
+          <li><a href="cookie-auth.html">HttpOnly Cookie Authentication</a></li>
+          <li><a href="exception-middleware.html">Global Exception Middleware</a></li>
+          <li><a href="webhooks.html">Webhooks</a></li>
+          <li><a href="permissions-roles.html">Permissions &amp; Role Hierarchy</a></li>
+          <li><a href="view-only-guard.html">View-Only Role Guard</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Blazor Frontend</summary>
+        <ul>
+          <li><a href="blazor-auth-state.html">JWT Auth State</a></li>
+          <li><a href="http-service.html">HTTP Service Wrapper</a></li>
+          <li><a href="toast-notifications.html">Toast Notification Service</a></li>
+          <li><a href="blazor-js-interop.html">JavaScript Interop</a></li>
+          <li><a href="blazor-confirm-dialog.html">Awaitable Confirm Dialog</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Angular Frontend</summary>
+        <ul>
+          <li><a href="angular-auth.html">JWT Auth (Interceptor &amp; Guard)</a></li>
+          <li><a href="angular-http-service.html">HTTP Service Wrapper</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Desktop Apps</summary>
+        <ul>
+          <li><a href="winforms-app.html">Windows Forms App</a></li>
+        </ul>
+      </details>
+      <details class="nav-section" open>
+        <summary>Patterns &amp; Utilities</summary>
+        <ul>
+          <li><a href="mapping-validation.html">Mapping &amp; Validation Extensions</a></li>
+          <li><a href="in-memory-caching.html">In-Memory Caching</a></li>
+          <li><a href="background-jobs.html">Background Jobs</a></li>
+          <li><a href="email-confirmation.html">Email Sending &amp; Confirmation Tokens</a></li>
+          <li><a href="automation-worker.html" class="active" aria-current="page">Periodic Automation Worker</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Data &amp; Auditing</summary>
+        <ul>
+          <li><a href="composable-repositories.html">Composable Repository Interfaces</a></li>
+          <li><a href="audit-logging.html">Field-Level Audit Logging</a></li>
+          <li><a href="pagination-pattern.html">Generic Pagination Pattern</a></li>
+          <li><a href="database-migrations.html">Migrations &amp; Transactions</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Deployment</summary>
+        <ul>
+          <li><a href="docker-nginx.html">Dockerizing for nginx</a></li>
+          <li><a href="docker-local-dev.html">Docker for Local Development</a></li>
+          <li><a href="ci-pipeline.html">CI Pipeline (GitHub Actions)</a></li>
+          <li><a href="versioning-releases.html">Versioned Releases &amp; Auto-Deploy</a></li>
+          <li><a href="release-pipeline.html">Release Pipeline (Test, Images, Deploy)</a></li>
+          <li><a href="release-notes-app-version.html">Release Notes &amp; App Version</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>CLI &amp; JSON</summary>
+        <ul>
+          <li><a href="cli-tool.html">Building a CLI Tool</a></li>
+          <li><a href="json-serialization.html">JSON Serialization Patterns</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Testing</summary>
+        <ul>
+          <li><a href="unit-testing-moq.html">Unit Testing with Moq</a></li>
+        </ul>
+      </details>
+      <details class="nav-section">
+        <summary>Worked Examples</summary>
+        <ul>
+          <li><a href="elo-rating-system.html">Elo Rating System</a></li>
+          <li><a href="stock-allocation.html">Stock Allocation</a></li>
+          <li><a href="shift-scheduling.html">Greedy Shift Scheduling</a></li>
+        </ul>
+      </details>
+    </div>
+    <div class="sidenav-footer">
+      <span>v1.1.0</span>
+      <button type="button" class="install-btn" id="installBtn" hidden>Install app</button>
+    </div>
+  </nav>
+
+  <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
+
+  <main class="content">
+    <article class="doc">
+<h1>Periodic Automation Worker</h1>
+<p class="lede">A <code>BackgroundService</code> that wakes on a fixed interval, runs a short list of "is anything due?" steps through one orchestrating service, and only logs when it actually did something. Built on <code>PeriodicTimer</code>, so ticks never overlap and shutdown is clean.</p>
+
+<h2>When this shape fits</h2>
+<p><a href="background-jobs.html">Background Jobs</a> covers the basics of a hosted loop. This page is the variant for <em>several related chores on one schedule</em> — apply the price changes that have come into effect, create the stock counts that are due, place the orders that are due, generate next month's staff roster — where each chore is cheap to check and the whole run can happen every few minutes.</p>
+
+<h2>The worker: <code>PeriodicTimer</code> instead of <code>Task.Delay</code></h2>
+<p>A <code>while</code> loop with <code>Task.Delay</code> drifts: the delay starts <em>after</em> the work, so a 15-minute interval with a 2-minute run fires every 17. <code>PeriodicTimer</code> ticks on a fixed cadence, and if a run overruns it simply doesn't queue up extra ticks — the next <code>WaitForNextTickAsync</code> returns as soon as the work finishes.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/StockAutomationWorker.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class StockAutomationWorker(IServiceScopeFactory scopeFactory, ILogger&lt;StockAutomationWorker&gt; logger)
+    : BackgroundService
+{
+    public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(Interval);
+
+        // do/while: the first run happens immediately at startup, then once per tick
+        do
+        {
+            try
+            {
+                // singleton worker, scoped services: one fresh scope per run
+                using var scope = scopeFactory.CreateScope();
+
+                var automation = scope.ServiceProvider.GetRequiredService&lt;IStockAutomationService&gt;();
+                var result = await automation.RunAsync(DateTime.Today);
+
+                int weeks = await scope.ServiceProvider.GetRequiredService&lt;IScheduleService&gt;()
+                    .GenerateUpcomingWeeksAsync(DateOnly.FromDateTime(DateTime.Today));
+
+                // quiet when idle — a log line per 15 minutes of "nothing happened" is noise
+                if (weeks &gt; 0)
+                    logger.LogInformation("Staff schedule: {Weeks} week(s) generated.", weeks);
+
+                if (result.PricesApplied + result.ExpiryCountsCreated + result.AutomaticOrderLines + result.OrdersSent &gt; 0)
+                    logger.LogInformation(
+                        "Stock automation: {Prices} price(s) applied, {Counts} expiry count(s) created, {Lines} automatic order line(s), {Sent} order(s) sent.",
+                        result.PricesApplied, result.ExpiryCountsCreated, result.AutomaticOrderLines, result.OrdersSent);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // a failed run is logged and retried on the next tick; it never kills the loop
+                logger.LogError(exception, "Stock automation failed.");
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+}</code></pre>
+</div>
+
+<h2>One orchestrating service, steps that return counts</h2>
+<p>The worker knows nothing about prices or orders. It calls one application service that runs the steps in a fixed order and reports how many things each one did. The date comes in as a parameter, so the whole run can be tested with any "today".</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/Ordering/StockAutomationService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public record StockAutomationResult(int PricesApplied, int ExpiryCountsCreated, int AutomaticOrderLines, int OrdersSent);
+
+public class StockAutomationService(
+    IProductControlService productControlService,
+    IStockCountService stockCountService,
+    IPurchaseOrderService purchaseOrderService) : IStockAutomationService
+{
+    public async Task&lt;StockAutomationResult&gt; RunAsync(DateTime today)
+    {
+        int prices = await productControlService.ApplyDuePricesAsync(today);
+        int counts = await stockCountService.CreateExpiryCountsAsync(today);
+        int lines  = await purchaseOrderService.CreateAutomaticOrdersAsync(today);
+        int sent   = await purchaseOrderService.SendDueOrdersAsync(today);   // after the lines exist
+        return new StockAutomationResult(prices, counts, lines, sent);
+    }
+}</code></pre>
+</div>
+
+<p>The order of the steps is deliberate: automatic order lines are created before due orders are sent, so a line created this run can go out in the same run.</p>
+
+<h2>Make every step state-driven, so repeating it is harmless</h2>
+<p>The worker runs every 15 minutes and also runs again after a restart, so each step must be safe to run twice. The trick is to compare <em>what should be true today</em> with <em>what is true now</em>, rather than "do the thing and remember that you did". For scheduled prices, a product's price rows say what the price is from which date; the step finds the row in effect today and only writes when the product's stored price differs:</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/ManagementApp/Stock/ProductControlService.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public async Task&lt;int&gt; ApplyDuePricesAsync(DateTime today)
+{
+    int applied = 0;
+    foreach (var product in await productRepository.GetProductsWithPricesAsync())
+    {
+        // the price row in effect today: latest start date that has already begun
+        var current = product.Prices
+            .Where(p =&gt; p.ValidFrom.Date &lt;= today.Date)
+            .OrderByDescending(p =&gt; p.ValidFrom.Date)
+            .ThenByDescending(p =&gt; p.CreatedAt)
+            .FirstOrDefault();
+
+        // nothing scheduled, or already applied: skip — this is what makes a rerun a no-op
+        if (current is null || current.Price == product.Price) continue;
+
+        product.Price = current.Price;
+        await productRepository.UpdateAsync(product);
+        applied++;
+    }
+    return applied;
+}</code></pre>
+</div>
+
+<p>The same idea runs through the sending step: it selects orders that are <em>open and due</em>, and once an order's status is <code>Sent</code> it no longer matches the query. A run that finds nothing due returns zeros — and the worker stays silent.</p>
+
+<h2>A switch to turn it off</h2>
+<p>Registration is conditional on configuration, defaulting to on. Tests or a second instance of the API can switch it off without a code change — important if two instances would otherwise both run the same chores.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>API/ConfigureServices.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">if (configuration.GetValue("StockAutomation:Enabled", true))
+    services.AddHostedService&lt;StockAutomationWorker&gt;();</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>"Today" is the server's local date.</strong> <code>DateTime.Today</code> uses the process time zone, which in a container is UTC unless you set it — "due today" would then flip at the wrong local hour. Set it in the final stage of the Dockerfile (the tzdata package must be installed for the name to resolve): <code>ENV TZ=Europe/Amsterdam</code>.</li>
+  <li><strong>One instance only.</strong> There's no lock around a run; two API instances would both execute every chore. Disable the worker on all but one, or add a distributed lock before scaling out.</li>
+  <li><strong>Catch everything except cancellation.</strong> The <code>when (exception is not OperationCanceledException)</code> filter lets shutdown propagate while a database blip just logs and waits for the next tick.</li>
+  <li><strong>Report counts, not just success.</strong> Returning how many things changed is what lets the worker log only meaningful runs — and gives a test something concrete to assert on.</li>
+  <li><strong>A new scope per run.</strong> Same rule as <a href="background-jobs.html">Background Jobs</a>: the worker is a singleton, repositories and the <code>DbContext</code> are not.</li>
+</ul>
+
+    </article>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>

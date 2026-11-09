@@ -1,0 +1,155 @@
+<h1>Stock Allocation (Worked Example)</h1>
+<p class="lede">Customer orders that can't be filled yet wait in a queue; when stock arrives, the oldest orders get it first and an order becomes "ready for pickup" only once <em>every</em> line is fully reserved. The decision is a pure function over plain objects — the repository work is a thin shell around it.</p>
+
+<h2>The problem</h2>
+<p>A shop takes orders for products it doesn't have right now. Each order line has an <code>Amount</code> and a <code>ReservedAmount</code> (how much has been set aside so far). When a delivery is booked in, or a customer order is cancelled, stock becomes free and has to be handed out fairly, without selling the same unit twice — and without ever marking an order ready when only part of it is covered.</p>
+
+<h2>Step 1: free stock is "on hand" minus "already reserved"</h2>
+<p>Reserved units are still physically on the shelf, so the number that matters to the queue is what's <em>unreserved</em>. The shell computes it per product and clamps at zero — a mismatch must never produce a negative "free" number that later subtracts from someone else's reservation.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/Ordering/StockAllocator.cs (the shell)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class StockAllocator(ICustomerOrderRepository customerOrderRepository, IProductRepository productRepository)
+    : IStockAllocator
+{
+    public async Task&lt;int&gt; AllocateAsync(IEnumerable&lt;Guid&gt; productIds)
+    {
+        var ids = productIds.Distinct().ToList();
+        if (ids.Count == 0) return 0;
+
+        // only orders that are still waiting AND contain one of the affected products
+        var waiting = await customerOrderRepository.GetWaitingForProductsAsync(ids);
+        if (waiting.Count == 0) return 0;
+
+        var products = await productRepository.GetByIdsAsync(ids);
+        var reserved = await productRepository.GetReservedStockAsync(ids);
+        var available = products.ToDictionary(p =&gt; p.Id, p =&gt; Math.Max(0, p.Stock - reserved.GetValueOrDefault(p.Id)));
+
+        var changed = Allocate(waiting, available, DateTime.UtcNow);
+        foreach (var order in changed)
+            await customerOrderRepository.UpdateAsync(order);
+
+        return changed.Count(o =&gt; o.Status == CustomerOrderStatus.ReadyForPickup);
+    }
+    // ...
+}</code></pre>
+</div>
+
+<h2>Step 2: the pure core</h2>
+<p><code>Allocate</code> is <code>static</code>, touches no repository and takes the current time as a parameter. It walks waiting orders oldest-first (order number breaks ties so the result is deterministic), reserves what it can line by line, and flips the order to ready only when nothing is missing. It returns just the orders it changed, so the shell saves exactly those.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>Application/Services/Ordering/StockAllocator.cs (the core)</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public static List&lt;CustomerOrder&gt; Allocate(
+    IEnumerable&lt;CustomerOrder&gt; waitingOrders,
+    Dictionary&lt;Guid, int&gt; available,
+    DateTime now)
+{
+    var changed = new List&lt;CustomerOrder&gt;();
+
+    foreach (var order in waitingOrders
+        .Where(o =&gt; o.Status == CustomerOrderStatus.Waiting)
+        .OrderBy(o =&gt; o.CreatedAt)
+        .ThenBy(o =&gt; o.OrderNumber))
+    {
+        bool touched = false;
+
+        foreach (var line in order.Lines.Where(l =&gt; l.ReservedAmount &lt; l.Amount))
+        {
+            int free = available.GetValueOrDefault(line.ProductId);
+            if (free &lt;= 0) continue;
+
+            // take as much as is still needed, but never more than is free
+            int take = Math.Min(free, line.Amount - line.ReservedAmount);
+            line.ReservedAmount += take;
+            available[line.ProductId] = free - take;   // the next order sees what's left
+            touched = true;
+        }
+
+        // all-or-nothing: ready only when every line is fully covered
+        if (order.Lines.All(l =&gt; l.ReservedAmount &gt;= l.Amount))
+        {
+            order.Status = CustomerOrderStatus.ReadyForPickup;
+            order.ReadyAt = now;
+            touched = true;
+        }
+
+        if (touched) changed.Add(order);
+    }
+
+    return changed;
+}</code></pre>
+</div>
+
+<p>Three details make it correct rather than just plausible:</p>
+<ul>
+  <li><strong>Partial reservations stick.</strong> An order that got 1 of 3 units keeps that 1 reserved (<code>ReservedAmount</code> is saved), so the next delivery only has to cover the remaining 2 and nobody behind it can take the unit.</li>
+  <li><strong>The dictionary is the running balance.</strong> Decrementing <code>available</code> as it goes is what lets one call serve many orders without double-counting stock.</li>
+  <li><strong><code>touched</code> avoids pointless writes.</strong> An order that couldn't get anything is left out of the result, so it isn't re-saved on every allocation run.</li>
+</ul>
+
+<h2>Step 3: call it whenever free stock can change</h2>
+<p>The allocator is called from the three places where free stock can appear: after a delivery against a purchase order is received, after a stock count is completed with products that came out higher than expected, and after a customer order is cancelled (which first zeroes its reservations). Each call passes only the affected product ids, so a trigger only re-examines orders that could benefit — which is why <code>GetWaitingForProductsAsync</code> filters by product.</p>
+
+<h2>Testing it: no mocks needed</h2>
+<p>Because <code>Allocate</code> is a static function over plain objects, the tests build orders and a dictionary and assert on the result. These are the real tests; the fairness rule is one of them.</p>
+
+<div class="code-block">
+  <div class="code-block-label">
+    <span>UnitTests/Services/OrderingServiceTests.cs</span>
+    <button class="copy-btn">Copy</button>
+  </div>
+  <pre><code class="language-csharp">public class StockAllocatorTests
+{
+    private static CustomerOrder Order(int number, DateTime createdAt, Guid productId, int amount, int reserved = 0) =&gt; new()
+    {
+        Id = Guid.NewGuid(),
+        OrderNumber = number,
+        CreatedAt = createdAt,
+        Status = CustomerOrderStatus.Waiting,
+        Lines = [new CustomerOrderLine { ProductId = productId, Amount = amount, ReservedAmount = reserved }],
+    };
+
+    [Fact]
+    public void Allocate_LimitedStock_OldestOrderFirst()
+    {
+        var product = Guid.NewGuid();
+        var older = Order(7000001, new DateTime(2026, 10, 1), product, 3);
+        var newer = Order(7000002, new DateTime(2026, 10, 2), product, 3);
+
+        // 4 units free for two orders wanting 3 each — passed in newest-first on purpose
+        var changed = StockAllocator.Allocate([newer, older], new Dictionary&lt;Guid, int&gt; { [product] = 4 }, DateTime.UtcNow);
+
+        Assert.Equal(CustomerOrderStatus.ReadyForPickup, older.Status);
+        Assert.Equal(CustomerOrderStatus.Waiting, newer.Status);
+        Assert.Equal(1, newer.Lines.Single().ReservedAmount);   // the leftover unit is held for it
+        Assert.Equal(2, changed.Count);
+    }
+
+    [Fact]
+    public void Allocate_NoStock_ChangesNothing()
+    {
+        var product = Guid.NewGuid();
+        var order = Order(7000001, DateTime.Today, product, 3);
+
+        var changed = StockAllocator.Allocate([order], new Dictionary&lt;Guid, int&gt; { [product] = 0 }, DateTime.UtcNow);
+
+        Assert.Empty(changed);
+        Assert.Equal(CustomerOrderStatus.Waiting, order.Status);
+    }
+}</code></pre>
+</div>
+
+<h3>Things to watch</h3>
+<ul>
+  <li><strong>Mutation is the contract.</strong> <code>Allocate</code> changes the orders and the dictionary you pass in. That's deliberate (the shell then saves the returned orders), but it means a caller must not reuse the same dictionary for a second, unrelated run.</li>
+  <li><strong>Fairness is by creation time.</strong> Oldest first can starve a big old order behind small new ones only if you change the ordering — here a big order keeps its partial reservations, so it can't be leapfrogged for the units it already holds.</li>
+  <li><strong>It runs after the stock change is saved, as a separate step.</strong> If the process dies between the two, free stock and waiting orders sit side by side until the next delivery, count or cancellation touches those products — nothing re-runs it on a schedule. If that gap matters, make the allocation another step of a periodic job like the one in <a href="automation-worker.html">Periodic Automation Worker</a>.</li>
+  <li><strong>Same shape as the rating example.</strong> A pure calculation tested with plain data and a thin orchestrating service around it is the pattern from <a href="elo-rating-system.html">Elo Rating System</a>.</li>
+</ul>

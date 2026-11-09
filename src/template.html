@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15181d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content=".NET Docs">
 <title>{{TITLE}} · Docs</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,7 +28,10 @@
     <div class="sidenav-scroll">
 {{SIDEBAR}}
     </div>
-    <div class="sidenav-footer">v{{VERSION}}</div>
+    <div class="sidenav-footer">
+      <span>v{{VERSION}}</span>
+      <button type="button" class="install-btn" id="installBtn" hidden>Install app</button>
+    </div>
   </nav>
 
   <div class="sidenav-backdrop" id="sidenavBackdrop"></div>
